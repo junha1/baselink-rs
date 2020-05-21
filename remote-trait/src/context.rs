@@ -69,6 +69,7 @@ pub use single_process_support::InstanceKey;
 
 pub mod global {
     use super::*;
+    #[cfg(feature ="single_process")]
     use single_process_support as remote_trait;
 
     context_provider! {RwLock<PortTable>}
@@ -88,8 +89,8 @@ pub mod global {
 /// Termination flag. If this is set true, drop() from imported service will be ignored.
 /// It is module author's job to utilize this.
 pub mod termination {
-    use super::*;
-    use single_process_support as remote_trait;
+    #[cfg(feature ="single_process")]
+    use super::single_process_support as remote_trait;
 
     context_provider! {std::sync::atomic::AtomicBool}
     pub fn get() -> &'static Context {

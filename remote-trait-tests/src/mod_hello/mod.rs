@@ -16,13 +16,13 @@
 
 mod impls;
 
+use crate::module_library::*;
 use crate::services::*;
 use impls::*;
 use parking_lot::RwLock;
 use remote_trait::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use test_module_library::*;
 
 pub struct MyContext {
     number: usize,

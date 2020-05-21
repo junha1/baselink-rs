@@ -15,9 +15,9 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::get_context;
+use crate::module_library::prelude::*;
 use crate::services::*;
 use std::sync::Arc;
-use test_module_library::prelude::*;
 
 #[remote_trait_macro::service_impl(RelayerFactory)]
 pub struct OrdinaryFactory {

@@ -14,12 +14,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use crate::module_library::*;
 use cbsb::execution::executor::{self, Executor};
 use cbsb::ipc::generate_random_name;
 use cbsb::ipc::{intra::Intra, servo_channel::ServoChannel as DefaultIpc, Ipc};
 use remote_trait::*;
 use std::collections::HashMap;
-use test_module_library::*;
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100_000);
 pub const SERVER_THREADS: usize = 16;

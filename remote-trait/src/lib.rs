@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub mod ipc;
 mod context;
+pub mod ipc;
 mod port;
 pub mod queue;
 mod service;

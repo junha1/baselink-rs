@@ -14,9 +14,9 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use crate::module_library::prelude::*;
 use crate::services::*;
 use std::sync::Arc;
-use test_module_library::prelude::*;
 
 #[remote_trait_macro::service_impl(HelloFactory)]
 pub struct Factory {

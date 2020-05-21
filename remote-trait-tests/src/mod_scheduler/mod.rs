@@ -16,12 +16,12 @@
 
 mod impls;
 
+use crate::module_library::*;
 use crate::services::*;
 use impls::*;
 use parking_lot::{Condvar, Mutex};
 use remote_trait::*;
 use std::sync::Arc;
-use test_module_library::*;
 
 pub struct MyContext {
     number: usize,

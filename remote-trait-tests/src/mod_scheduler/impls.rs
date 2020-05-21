@@ -15,8 +15,8 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::get_context;
+use crate::module_library::prelude::*;
 use crate::services::*;
-use test_module_library::prelude::*;
 
 #[remote_trait_macro::service_impl(Schedule)]
 pub struct MySchedule {

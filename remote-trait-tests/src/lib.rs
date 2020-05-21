@@ -30,12 +30,12 @@ mod mod_relayer;
 mod mod_scheduler;
 #[cfg(test)]
 mod module;
+pub mod module_library;
 mod services;
 #[cfg(test)]
 mod test1;
 #[cfg(test)]
 mod test2;
-pub mod module_library;
 
 // main functions for binary modules
 pub use mod_hello::main_like as mod_hello_main;
