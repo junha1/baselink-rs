@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "fml",
-    "fml-tests",
-    "baselink"
+    "remote-trait",
+    "remote-trait-tests",
+    "test-module-library"
 ]
