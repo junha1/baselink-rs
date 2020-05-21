@@ -19,7 +19,7 @@ pub mod server;
 
 use crate::context::{single_process_support::InstanceKey, RemoteTraitConfig};
 use crate::service::{MethodId, PortDispatcher, ServiceObjectId};
-use cbsb::ipc::{multiplex, IpcRecv, IpcSend};
+use crate::ipc::{multiplex, IpcRecv, IpcSend};
 use std::sync::Arc;
 
 // This module implements two important communication models: Client and Server
