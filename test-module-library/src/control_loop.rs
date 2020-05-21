@@ -23,6 +23,7 @@ use remote_trait::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+
 pub fn recv<I: Ipc, T: serde::de::DeserializeOwned>(ctx: &executee::Context<I>) -> T {
     serde_cbor::from_slice(&ctx.ipc.as_ref().unwrap().recv(None).unwrap()).unwrap()
 }
@@ -44,6 +45,9 @@ fn create_port(
     if ipc_type == "DomainSocket" {
         let ipc = DefaultIpc::new(ipc_config);
         let (send, recv) = ipc.split();
+
+        remote_trait::ipc::IpcSend::send(&send, b"123");
+
         Port::new(send, recv, port_id, dispatcher, instance_key, config_remote_trait)
     } else if ipc_type == "Intra" {
         let ipc = intra::Intra::new(ipc_config);

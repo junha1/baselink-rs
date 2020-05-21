@@ -14,30 +14,20 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#![allow(clippy::mutex_atomic)]
-// TODO: Remove this
-#![allow(clippy::ptr_arg)]
-
 extern crate codechain_basesandbox as cbsb;
-extern crate linkme;
-#[macro_use]
-extern crate intertrait;
+use cbsb::execution::executee;
+use cbsb::ipc::{IpcRecv, IpcSend};
+use std::time::Duration;
 
-#[cfg(test)]
-mod key;
-mod mod_hello;
-mod mod_relayer;
-mod mod_scheduler;
-#[cfg(test)]
-mod module;
-mod services;
-#[cfg(test)]
-mod test1;
-#[cfg(test)]
-mod test2;
-pub mod module_library;
+type IpcScheme = cbsb::ipc::servo_channel::ServoChannel;
 
-// main functions for binary modules
-pub use mod_hello::main_like as mod_hello_main;
-pub use mod_relayer::main_like as mod_relayer_main;
-pub use mod_scheduler::main_like as mod_scheduler_main;
+#[cfg(all(unix, target_arch = "x86_64"))]
+fn main() -> Result<(), String> {
+    let args = std::env::args().collect();
+    let ctx = executee::start::<IpcScheme>(args);
+    let r = ctx.ipc.as_ref().unwrap().recv(Some(Duration::from_millis(100))).unwrap();
+    assert_eq!(r, b"Hello?\0");
+    ctx.ipc.as_ref().unwrap().send(b"I'm here!\0");
+    ctx.terminate();
+    Ok(())
+}

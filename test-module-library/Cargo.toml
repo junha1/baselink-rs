@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 crossbeam = "0.7.3"
-codechain-basesandbox = { git = "https://github.com/CodeChain-io/foundry-sandbox" }
+codechain-basesandbox = { path = "../basesandbox" }
 remote-trait = {path = "../remote-trait"}
 rand = "0.6.1"
 serde = { version = "1.0", features = ["derive"] }

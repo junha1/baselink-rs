@@ -9,7 +9,7 @@ default = ["remote-trait/default", "test-module-library/default"]
 single_process = ["remote-trait/single_process", "test-module-library/single_process"]
 
 [dependencies]
-codechain-basesandbox = { git = "https://github.com/CodeChain-io/foundry-sandbox" }
+codechain-basesandbox = { path = "../basesandbox" }
 remote-trait= { path = "../remote-trait"}
 test-module-library = {path = "../test-module-library"}
 remote-trait-macro = { path = "../remote-trait/macro" }

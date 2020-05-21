@@ -14,30 +14,5 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#![allow(clippy::mutex_atomic)]
-// TODO: Remove this
-#![allow(clippy::ptr_arg)]
-
-extern crate codechain_basesandbox as cbsb;
-extern crate linkme;
-#[macro_use]
-extern crate intertrait;
-
-#[cfg(test)]
-mod key;
-mod mod_hello;
-mod mod_relayer;
-mod mod_scheduler;
-#[cfg(test)]
-mod module;
-mod services;
-#[cfg(test)]
-mod test1;
-#[cfg(test)]
-mod test2;
-pub mod module_library;
-
-// main functions for binary modules
-pub use mod_hello::main_like as mod_hello_main;
-pub use mod_relayer::main_like as mod_relayer_main;
-pub use mod_scheduler::main_like as mod_scheduler_main;
+pub mod execution;
+pub mod ipc;
