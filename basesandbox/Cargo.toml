@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 primitives = { git = "https://github.com/CodeChain-io/rust-codechain-primitives.git", version = "0.4" }
 ccrypto = { package = "codechain-crypto", git = "https://github.com/CodeChain-io/rust-codechain-crypto.git", version = "0.2" }
-remote-trait = { path = "../remote-trait" }
+remote-trait-object = { path = "../remote-trait-object" }
 crossbeam = "0.7.3"
 nix = "0.17.0"
 hex = "0.4.2"

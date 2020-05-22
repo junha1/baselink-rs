@@ -1,0 +1,38 @@
+[package]
+name = "remote-trait-object-tests"
+version = "0.1.0"
+authors = ["CodeChain Team <hi@codechain.io>"]
+edition = "2018"
+
+[features]
+default = ["remote-trait-object/default"]
+single_process = ["remote-trait-object/single_process"]
+
+[dependencies]
+codechain-basesandbox = { path = "../basesandbox" }
+remote-trait-object= { path = "../remote-trait-object"}
+remote-trait-object-macro = { path = "../remote-trait-object/macro" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_cbor = "0.11.1"
+serde_derive = "1.0"
+intertrait = "0.2.0"
+linkme = "0.2.1"
+rand = "0.7.3"
+once_cell = "1.3.1"
+parking_lot = "0.10.2"
+
+[[bin]]
+path = "./bin/mod_hello.rs"
+name = "test_mod_hello_rs"
+required-features = ["default"]
+
+[[bin]]
+path = "./bin/mod_relayer.rs"
+name = "test_mod_relayer_rs"
+required-features = ["default"]
+
+[[bin]]
+path = "./bin/mod_scheduler.rs"
+name = "test_mod_scheduler_rs"
+required-features = ["default"]

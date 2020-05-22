@@ -14,4 +14,28 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub use remote_trait_object::{HandleInstance, SArc};
+use super::get_context;
+use crate::module_library::prelude::*;
+use crate::services::*;
+
+#[remote_trait_object_macro::service_impl(Schedule)]
+pub struct MySchedule {
+    pub handle: HandleInstance,
+}
+
+impl Schedule for MySchedule {
+    fn get(&self) -> AvailiableMap {
+        let mut avail = get_context().lock.lock();
+        while !*avail {
+            get_context().cvar.wait(&mut avail);
+        }
+        *avail = false;
+        get_context().map.lock().clone()
+    }
+
+    fn set(&self, s: AvailiableMap) {
+        *get_context().map.lock() = s;
+        *get_context().lock.lock() = true;
+        get_context().cvar.notify_one();
+    }
+}

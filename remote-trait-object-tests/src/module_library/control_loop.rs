@@ -14,15 +14,14 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::bootstrap::*;
-use crate::context::*;
+use super::bootstrap::*;
+use super::context::*;
 use cbsb::execution::executee;
 use cbsb::ipc::{intra, servo_channel::ServoChannel as DefaultIpc, Ipc};
 use parking_lot::RwLock;
 use remote_trait_object::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-
 
 pub fn recv<I: Ipc, T: serde::de::DeserializeOwned>(ctx: &executee::Context<I>) -> T {
     serde_cbor::from_slice(&ctx.ipc.as_ref().unwrap().recv(None).unwrap()).unwrap()
@@ -45,9 +44,6 @@ fn create_port(
     if ipc_type == "DomainSocket" {
         let ipc = DefaultIpc::new(ipc_config);
         let (send, recv) = ipc.split();
-
-        remote_trait_object::ipc::IpcSend::send(&send, b"123");
-
         Port::new(send, recv, port_id, dispatcher, instance_key, config_remote_trait_object)
     } else if ipc_type == "Intra" {
         let ipc = intra::Intra::new(ipc_config);
@@ -81,7 +77,7 @@ pub fn run_control_loop<I: Ipc, H: HandlePreset>(
         map: HashMap::new(),
     });
     global::set(ports);
-    crate::context::set_module_config(config);
+    super::context::set_module_config(config);
     initializer();
     termination::set(std::sync::atomic::AtomicBool::new(false));
 
@@ -128,6 +124,6 @@ pub fn run_control_loop<I: Ipc, H: HandlePreset>(
         send(&ctx, &"done".to_owned());
     }
     termination::get().store(true, std::sync::atomic::Ordering::Relaxed);
-    crate::context::remove_module_config();
+    super::context::remove_module_config();
     ctx.terminate();
 }

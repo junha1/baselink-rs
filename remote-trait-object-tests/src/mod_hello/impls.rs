@@ -14,4 +14,32 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub use remote_trait_object::{HandleInstance, SArc};
+use crate::module_library::prelude::*;
+use crate::services::*;
+use std::sync::Arc;
+
+#[remote_trait_object_macro::service_impl(HelloFactory)]
+pub struct Factory {
+    pub handle: remote_trait_object::HandleInstance,
+}
+
+impl HelloFactory for Factory {
+    fn create(&self, name: &str) -> SArc<dyn HelloRobot> {
+        SArc::new(Arc::new(Robot {
+            handle: Default::default(),
+            name: name.to_string(),
+        }))
+    }
+}
+
+#[remote_trait_object_macro::service_impl(HelloRobot)]
+pub struct Robot {
+    pub handle: HandleInstance,
+    pub name: String,
+}
+
+impl HelloRobot for Robot {
+    fn hello(&self, flag: i32) -> String {
+        format!("{}{}", self.name, flag)
+    }
+}

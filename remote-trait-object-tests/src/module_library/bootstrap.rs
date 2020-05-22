@@ -1,10 +1,6 @@
-#![allow(dead_code, unused_variables)]
-
 use remote_trait_object::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
-/// TODO: Replace this with LinkBootstrapping.
 #[derive(PartialEq, Serialize, Deserialize, Debug)]
 pub struct HandleExchange {
     /// Id of exporter (same as that in Config)
@@ -16,8 +12,6 @@ pub struct HandleExchange {
     /// Opaque argument
     pub argument: Vec<u8>,
 }
-
-/// TODO: Replace this with LinkBootstrapping.
 /// We assume that there could be at most one link for a pair of modules in this exchange phase,
 /// so no information about PortId is carried.
 pub trait HandlePreset {
@@ -25,9 +19,7 @@ pub trait HandlePreset {
     fn import(exchange: HandleExchange);
 }
 
-/// TODO: Replace this with LinkBootstrapping
 pub fn find_port_id(id: &str) -> Result<PortId, ()> {
     let table = global::get().read();
-    let keys: Vec<String> = (*table).map.iter().map(|x| (x.1).0.clone()).collect();
     Ok(*table.map.iter().find(|&(_, (name, ..))| name == id).ok_or(())?.0)
 }
