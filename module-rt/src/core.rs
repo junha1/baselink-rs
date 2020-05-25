@@ -34,16 +34,8 @@ impl ExportingServicePool {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct CoreMessageCreatePort {
-    pub ipc_type: String,
-    pub ipc_meta_argument: Vec<u8>,
-    pub ipc_argument: Vec<u8>,
-}
-
-#[derive(Serialize, Deserialize)]
 pub enum CoreMessage {
-    CreatePort(CoreMessageCreatePort),
+    CreatePort(Vec<u8>, Vec<u8>),
     Terminate,
     Debug(Vec<u8>),
 }
@@ -68,7 +60,23 @@ impl<I: Ipc> Core<I> {
         }
     }
 
+    pub fn get_export_pool(&self) -> Arc<Mutex<ExportingServicePool>> {
+        self.export_pool.clone()
+    }
+
     pub fn get_message(&self) -> CoreMessage {
-        recv(&self.process_executee)
+        let op: String = recv(&self.process_executee);
+        match op.as_str() {
+            "create_port" => {
+                let (a1, a2) = recv(&self.process_executee);
+                CoreMessage::CreatePort(a1, a2)
+            }
+            "terminate" => CoreMessage::Terminate,
+            "debug" => {
+                let (a1,) = recv(&self.process_executee);
+                CoreMessage::Debug(a1)
+            }
+            _ => panic!(),
+        }
     }
 }
