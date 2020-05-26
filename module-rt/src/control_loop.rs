@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 
-pub fn control_loop<I: Ipc + 'static>(mut core: crate::core::Core<I>) {
+pub fn control_loop<I: Ipc + 'static>(mut core: crate::core::Core<I>, debug_funciton: Box<dyn Fn(Vec<u8>) -> Vec<u8>>) {
     let ports: Arc<RwLock<HashMap<PortId, Mutex<Port<I>>>>> = Default::default();
     let mut port_id_count = 1;
     let mut job_list = Vec::new();
@@ -26,8 +26,12 @@ pub fn control_loop<I: Ipc + 'static>(mut core: crate::core::Core<I>) {
 
                 port_id_count += 1;
             }
-            CoreMessage::Debug(_) => panic!(),
-            CoreMessage::Terminate => panic!(),
+            CoreMessage::Debug(a) => {
+                core.response(&debug_funciton(a))
+            },
+            CoreMessage::Terminate => {
+                break;
+            },
         }
     }
 

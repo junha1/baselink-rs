@@ -79,4 +79,8 @@ impl<I: Ipc> Core<I> {
             _ => panic!(),
         }
     }
+
+    pub fn response<T: Serialize>(&self, r: &T) {
+        send(&self.process_executee, r);
+    }
 }

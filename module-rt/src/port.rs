@@ -52,8 +52,10 @@ impl<I: Ipc + 'static> Port<I> {
         let dispatcher = Arc::new(remote_trait_object::PortDispatcher::new(0, 128));
         let config = recv(&ipc_common);
 
-        let (send, recv) = ipc_common.split();
-        RtoPort::new(send, recv, 0, dispatcher, 0, &config);
+        let (send_half, recv_half) = ipc_common.split();
+        RtoPort::new(send_half, recv_half, 0, dispatcher, 0, &config);
+
+        send(&ipc_meta, &"Ready");
 
         unimplemented!()
     }
