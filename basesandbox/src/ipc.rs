@@ -17,6 +17,7 @@
 pub mod domain_socket;
 pub mod intra;
 pub mod servo_channel;
+pub mod domain_socket2;
 
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
