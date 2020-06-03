@@ -25,7 +25,7 @@ use cbsb::ipc::{IpcRecv, IpcSend, Terminate};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-type IpcScheme = cbsb::ipc::servo_channel::ServoChannel;
+type IpcScheme = cbsb::ipc::domain_socket2::DomainSocket; //cbsb::ipc::servo_channel::ServoChannel;
 
 // CI server is really slow for this. Usually 10 is ok.
 const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10000);
@@ -243,6 +243,8 @@ fn multiplexer() {
     let (s1_2, r1_2) = multiplexed1.pop().unwrap();
     let (s2_2, r2_2) = multiplexed2.pop().unwrap();
 
+    println!("QWEQWEQWEQWE");
+    
     s1_1.send(b"11".to_vec()).unwrap();
     assert_eq!(r2_1.recv().unwrap(), b"11");
 
@@ -254,6 +256,8 @@ fn multiplexer() {
 
     s1_2.send(b"04".to_vec()).unwrap();
     assert_eq!(r2_2.recv().unwrap(), b"04");
+
+    println!("QWEQWEQWEQWE");
 
     // we have to drop the multiplexer itself first
     drop(multiplxer1);

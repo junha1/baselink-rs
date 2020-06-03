@@ -1,14 +1,12 @@
 use super::*;
-use std::cell::RefCell;
-use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
-use std::sync::Arc;
-use std::io::{Write, Read};
 use parking_lot::RwLock;
-use std::marker::PhantomData;
-use std::io::Cursor;
+use std::cell::RefCell;
+use std::io::{Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::Arc;
 
 pub struct DomainSocketSend {
-    socket: Arc<RwLock<UnixStream>>
+    socket: Arc<RwLock<UnixStream>>,
 }
 
 impl IpcSend for DomainSocketSend {
@@ -33,28 +31,31 @@ impl IpcRecv for DomainSocketRecv {
     fn recv(&self, timeout: Option<std::time::Duration>) -> Result<Vec<u8>, RecvError> {
         let mut guard = self.socket.write();
         guard.set_read_timeout(timeout).unwrap();
-        let count = guard.read(&mut self.buffer.borrow_mut()).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::TimedOut {
-                Ok(Result::<usize, RecvError>::Err(RecvError::TimeOut))
-            } else {
-                Err(e)
+
+        fn recv_helper(buf: &mut [u8], stream: &mut UnixStream) -> Result<(), RecvError> {
+            let r = stream.read_exact(buf);
+            match r {
+                Ok(_) => Ok(()),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::TimedOut => Err(RecvError::TimeOut),
+                    std::io::ErrorKind::UnexpectedEof => Err(RecvError::Termination),
+                    e => panic!(e),
+                },
             }
-        }).map(|x| Ok(x)).unwrap()?;
-        let size_buffer: [u8; 8] = std::convert::TryInto::try_into(&self.buffer.borrow()[0..8]).unwrap();
-        
-        let size = usize::from_be_bytes(size_buffer);
-        let size_read = count - 8;
+        }
+
+        let mut size_buf = [0 as u8; 8];
+        recv_helper(&mut size_buf, &mut *guard)?;
+        let size = usize::from_be_bytes(size_buf);
 
         let mut result: Vec<u8> = Vec::with_capacity(size);
-        result.extend_from_slice(&self.buffer.borrow()[8..]);
+        // TODO: avoid useless initialization
+        result.resize(size, 0);
 
-        guard.read_exact(&mut result[size_read..]).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::TimedOut {
-                Ok(Result::<usize, RecvError>::Err(RecvError::TimeOut))
-            } else {
-                Err(e)
-            }
-        }).map(|_| Ok(())).unwrap()?;
+        if size == 0 {
+            panic!()
+        }
+        recv_helper(&mut result[0..], &mut *guard)?;
         Ok(result)
     }
 
@@ -75,9 +76,8 @@ impl Terminate for Terminator {
 
 pub struct DomainSocket {
     send: DomainSocketSend,
-    recv: DomainSocketRecv
+    recv: DomainSocketRecv,
 }
-
 
 impl IpcSend for DomainSocket {
     fn send(&self, data: &[u8]) {
@@ -112,7 +112,7 @@ impl Ipc for DomainSocket {
 
     fn new(data: Vec<u8>) -> Self {
         let (am_i_server, address_src, address_dst): (bool, String, String) = serde_cbor::from_slice(&data).unwrap();
-        
+
         let stream = if am_i_server {
             let listener = UnixListener::bind(&address_src).unwrap();
             listener.incoming().nth(0).unwrap().unwrap()
@@ -143,5 +143,30 @@ impl Ipc for DomainSocket {
     fn split(self) -> (Self::SendHalf, Self::RecvHalf) {
         (self.send, self.recv)
     }
+}
 
+#[test]
+fn f123() {
+    let (a1, a2) = DomainSocket::arguments_for_both_ends();
+
+    let t = std::thread::spawn(|| DomainSocket::new(a2));
+    let s1 = DomainSocket::new(a1);
+    let s2 = t.join().unwrap();
+
+    let huge_data = {
+        let mut v = Vec::new();
+        for i in 0..300000 {
+            v.push((i % 255) as u8)
+        }
+        v
+    };
+
+    s2.send(&huge_data);
+    
+    let r = s1.recv(None).unwrap();
+
+    s1.send(&huge_data);
+    let r = s2.recv(None).unwrap();
+
+    println!("DONE");
 }

@@ -26,12 +26,8 @@ pub fn control_loop<I: Ipc + 'static>(mut core: crate::core::Core<I>, debug_func
 
                 port_id_count += 1;
             }
-            CoreMessage::Debug(a) => {
-                core.response(&debug_funciton(a))
-            },
-            CoreMessage::Terminate => {
-                break;
-            },
+            CoreMessage::Debug(a) => core.response(&debug_funciton(a)),
+            CoreMessage::Terminate => break,
         }
     }
 

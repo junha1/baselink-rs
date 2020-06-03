@@ -15,9 +15,9 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub mod domain_socket;
+pub mod domain_socket2;
 pub mod intra;
 pub mod servo_channel;
-pub mod domain_socket2;
 
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
