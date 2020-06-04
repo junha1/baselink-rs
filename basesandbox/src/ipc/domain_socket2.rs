@@ -21,7 +21,6 @@ impl IpcSend for DomainSocketSend {
 
 pub struct DomainSocketRecv {
     socket: Arc<RwLock<UnixStream>>,
-    buffer: RefCell<Vec<u8>>,
 }
 
 impl IpcRecv for DomainSocketRecv {
@@ -128,14 +127,16 @@ impl Ipc for DomainSocket {
             })()
         };
 
+        stream.set_write_timeout(None).unwrap();
+        stream.set_nonblocking(false).unwrap();
         let socket = Arc::new(RwLock::new(stream));
+
         DomainSocket {
             send: DomainSocketSend {
                 socket: socket.clone(),
             },
             recv: DomainSocketRecv {
                 socket,
-                buffer: RefCell::new(vec![0; 1024 * 8 + 8]),
             },
         }
     }
@@ -162,7 +163,7 @@ fn f123() {
     };
 
     s2.send(&huge_data);
-    
+
     let r = s1.recv(None).unwrap();
 
     s1.send(&huge_data);

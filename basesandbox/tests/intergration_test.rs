@@ -152,13 +152,21 @@ fn terminator_socket() {
     let barrier = Arc::new(Barrier::new(2));
     let barrier_ = barrier.clone();
     let t = thread::spawn(move || {
+        println!("1");
         assert_eq!(d1.recv(None).unwrap(), vec![1, 2, 3]);
+        println!("2");
         barrier_.wait();
-        assert_eq!(d1.recv(None).unwrap_err(), cbsb::ipc::RecvError::Termination)
+        println!("3");
+        assert_eq!(d1.recv(None).unwrap_err(), cbsb::ipc::RecvError::Termination);
+        println!("4");
     });
+    println!("5");
     d2.send(&[1, 2, 3]);
+    println!("6");
     barrier.wait();
+    println!("7");
     terminator.terminate();
+    println!("8");
     t.join().unwrap();
 }
 
@@ -194,6 +202,7 @@ fn socket_must_block() {
             let r = d1.recv(None).unwrap();
             assert!(r.iter().all(|&x| x == (i % 256) as u8));
             std::thread::sleep(std::time::Duration::from_millis(10));
+            println!("{}", i);
         }
         barrier_.wait();
         assert_eq!(d1.recv(None).unwrap_err(), cbsb::ipc::RecvError::Termination);
@@ -224,6 +233,8 @@ impl Forward for TestForward {
 
 #[test]
 fn multiplexer() {
+    println!("QQQQQQXXXXX");
+
     let (c1, c2) = IpcScheme::arguments_for_both_ends();
     let d1 = thread::spawn(|| IpcScheme::new(c1));
     let d2 = IpcScheme::new(c2);
@@ -244,7 +255,7 @@ fn multiplexer() {
     let (s2_2, r2_2) = multiplexed2.pop().unwrap();
 
     println!("QWEQWEQWEQWE");
-    
+
     s1_1.send(b"11".to_vec()).unwrap();
     assert_eq!(r2_1.recv().unwrap(), b"11");
 
