@@ -1,26 +1,52 @@
 use super::*;
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use mio::net::{UnixStream, UnixListener};
 use std::sync::Arc;
+use std::marker::PhantomData;
+use mio::{Events, Interest, Poll, Token};
+use mio::net::UdpSocket;
+const POLL_TOKEN: Token = Token(0);
 
 pub struct DomainSocketSend {
-    socket: Arc<RwLock<UnixStream>>,
+    socket: Arc<Mutex<UnixStream>>,
+    poll: Mutex<Poll>,
+    _prevent_sync: PhantomData<std::cell::Cell<()>>
 }
 
 impl IpcSend for DomainSocketSend {
     fn send(&self, data: &[u8]) {
-        let mut guard = self.socket.write();
+        let mut guard = self.socket.lock();
         let size: [u8; 8] = data.len().to_be_bytes();
-        // these two operations must be atomic
-        assert_eq!(guard.write(&size).unwrap(), 8);
-        assert_eq!(guard.write(data).unwrap(), data.len());
+        
+        let mut send_helper= |buf: &[u8]| {
+            let mut sent = 0;
+            let mut events = Events::with_capacity(1);
+            while sent < data.len() {
+                self.poll.lock().poll(&mut events, None).unwrap();
+                assert_eq!(events.iter().nth(0).unwrap().token(), POLL_TOKEN, "Invalid socket event");
+                match guard.write(buf) {
+                    Ok(x) => sent += x,
+                    Err(e) => {
+                        match e.kind() {
+                            std::io::ErrorKind::WouldBlock => (),
+                            _ => panic!("Failed to send")
+                        }
+                    },
+                }
+            }
+            assert_eq!(sent, data.len());
+        };
+        send_helper(&size);
+        send_helper(&data);
     }
 }
 
 pub struct DomainSocketRecv {
-    socket: Arc<RwLock<UnixStream>>,
+    socket: Arc<Mutex<UnixStream>>,
+    poll: Mutex<Poll>,
+    _prevent_sync: PhantomData<std::cell::Cell<()>>
 }
 
 impl IpcRecv for DomainSocketRecv {
@@ -28,33 +54,47 @@ impl IpcRecv for DomainSocketRecv {
 
     /// Note that DomainSocketRecv is !Sync, so this is guaranteed to be mutual exclusive.
     fn recv(&self, timeout: Option<std::time::Duration>) -> Result<Vec<u8>, RecvError> {
-        let mut guard = self.socket.write();
-        guard.set_read_timeout(timeout).unwrap();
-
-        fn recv_helper(buf: &mut [u8], stream: &mut UnixStream) -> Result<(), RecvError> {
+        fn recv_helper(buf: &mut [u8], stream: &mut UnixStream) -> Result<bool, RecvError> {
             let r = stream.read_exact(buf);
             match r {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(true),
                 Err(e) => match e.kind() {
-                    std::io::ErrorKind::TimedOut => Err(RecvError::TimeOut),
                     std::io::ErrorKind::UnexpectedEof => Err(RecvError::Termination),
+                    std::io::ErrorKind::WouldBlock => Ok(false), // spurious wakeup
                     e => panic!(e),
                 },
             }
         }
+        let mut events = Events::with_capacity(1);
 
-        let mut size_buf = [0 as u8; 8];
-        recv_helper(&mut size_buf, &mut *guard)?;
-        let size = usize::from_be_bytes(size_buf);
+        let size;
+        loop {
+            self.poll.lock().poll(&mut events, timeout).map_err(|_| RecvError::TimeOut)?;
+            assert_eq!(events.iter().nth(0).unwrap().token(), POLL_TOKEN, "Invalid socket event");
+            let mut guard = self.socket.lock();
+            let mut size_buf = [0 as u8; 8];
+            if recv_helper(&mut size_buf, &mut *guard)? {
+                size = usize::from_be_bytes(size_buf);
+                break;
+            }
+        }
 
         let mut result: Vec<u8> = Vec::with_capacity(size);
         // TODO: avoid useless initialization
         result.resize(size, 0);
-
         if size == 0 {
             panic!()
         }
-        recv_helper(&mut result[0..], &mut *guard)?;
+
+        loop {
+            let mut guard = self.socket.lock();
+            if recv_helper(&mut result[0..], &mut *guard)? {
+                break;
+            }
+            // we wait later this time, since the preceeding polling might be upto this recv.
+            self.poll.lock().poll(&mut events, timeout).map_err(|_| RecvError::TimeOut)?;
+            assert_eq!(events.iter().nth(0).unwrap().token(), POLL_TOKEN, "Invalid socket event");
+        }
         Ok(result)
     }
 
@@ -63,11 +103,11 @@ impl IpcRecv for DomainSocketRecv {
     }
 }
 
-pub struct Terminator(Arc<RwLock<UnixStream>>);
+pub struct Terminator(Arc<Mutex<UnixStream>>);
 
 impl Terminate for Terminator {
     fn terminate(&self) {
-        if let Err(e) = (self.0).read().shutdown(std::net::Shutdown::Both) {
+        if let Err(e) = (self.0).lock().shutdown(std::net::Shutdown::Both) {
             assert_eq!(e.kind(), std::io::ErrorKind::NotConnected);
         }
     }
@@ -112,9 +152,18 @@ impl Ipc for DomainSocket {
     fn new(data: Vec<u8>) -> Self {
         let (am_i_server, address_src, address_dst): (bool, String, String) = serde_cbor::from_slice(&data).unwrap();
 
-        let stream = if am_i_server {
+        // We use spinning for the connection establishment
+        let mut stream = if am_i_server {
             let listener = UnixListener::bind(&address_src).unwrap();
-            listener.incoming().nth(0).unwrap().unwrap()
+            (|| {
+                for _ in 0..100 {
+                    if let Ok(stream) = listener.accept() {
+                        return stream
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                panic!("Failed to establish domain socket within a timeout")
+            })().0
         } else {
             (|| {
                 for _ in 0..100 {
@@ -127,16 +176,27 @@ impl Ipc for DomainSocket {
             })()
         };
 
-        stream.set_write_timeout(None).unwrap();
-        stream.set_nonblocking(false).unwrap();
-        let socket = Arc::new(RwLock::new(stream));
+
+        let mut poll1 = Poll::new().unwrap();
+        poll1.registry()
+        .register(&mut stream, POLL_TOKEN, Interest::READABLE).unwrap();
+
+        let mut poll2 = Poll::new().unwrap();
+        poll2.registry()
+        .register(&mut stream, POLL_TOKEN, Interest::READABLE).unwrap();
+
+        let socket = Arc::new(Mutex::new(stream));
 
         DomainSocket {
             send: DomainSocketSend {
                 socket: socket.clone(),
+                poll: Mutex::new(poll1),
+                _prevent_sync: PhantomData
             },
             recv: DomainSocketRecv {
                 socket,
+                poll: Mutex::new(poll2),
+                _prevent_sync: PhantomData
             },
         }
     }
@@ -168,6 +228,4 @@ fn f123() {
 
     s1.send(&huge_data);
     let r = s2.recv(None).unwrap();
-
-    println!("DONE");
 }
