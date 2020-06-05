@@ -77,7 +77,7 @@ use super::*;
 use crate::key::{end_test, start_test};
 use cbsb::execution::executor::{Executable, PlainThread};
 use cbsb::ipc::intra::Intra;
-use cbsb::ipc::servo_channel::ServoChannel as DefaultIpc;
+use crate::module_library::DefaultIpc;
 
 fn register() -> (String, String) {
     let name1 = cbsb::ipc::generate_random_name();

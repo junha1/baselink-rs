@@ -17,7 +17,8 @@
 use super::bootstrap::*;
 use super::context::*;
 use cbsb::execution::executee;
-use cbsb::ipc::{intra, servo_channel::ServoChannel as DefaultIpc, Ipc};
+use cbsb::ipc::{intra, Ipc};
+use super::DefaultIpc;
 use parking_lot::RwLock;
 use remote_trait_object::*;
 use std::collections::HashMap;

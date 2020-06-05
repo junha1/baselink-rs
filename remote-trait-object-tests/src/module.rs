@@ -17,7 +17,7 @@
 use crate::module_library::*;
 use cbsb::execution::executor::{self, Executor};
 use cbsb::ipc::generate_random_name;
-use cbsb::ipc::{intra::Intra, servo_channel::ServoChannel as DefaultIpc, Ipc};
+use cbsb::ipc::{intra::Intra, domain_socket2::DomainSocket as DefaultIpc, Ipc};
 use remote_trait_object::*;
 use std::collections::HashMap;
 

@@ -118,7 +118,7 @@ pub fn main_like(args: Vec<String>) {
 
 #[cfg(not(feature = "single_process"))]
 pub fn main_like(args: Vec<String>) {
-    run_control_loop::<cbsb::ipc::servo_channel::ServoChannel, Preset>(
+    run_control_loop::<crate::module_library::DefaultIpc, Preset>(
         args,
         Box::new(initializer),
         Some(Box::new(initiate)),
