@@ -17,13 +17,17 @@ fn send_routine(
     let send_helper = |buf: &[u8]| {
         let mut sent = 0;
         while sent < buf.len() {
-            match socket.lock().write(buf) {
+            // NOTE: Never replace r directly into match.
+            // If then, the mutex will be locked during the whole match statement!
+            let r = socket.lock().write(&buf[sent..]);
+            match r {
                 Ok(x) => sent += x,
                 Err(e) => {
                     match e.kind() {
                         // spurious wakeup
+                        std::io::ErrorKind::UnexpectedEof => return Err(()),
                         std::io::ErrorKind::WouldBlock => write_signal.recv().unwrap().map_err(|_| ())?,
-                        _ => panic!("Failed to send"),
+                        _ => panic!(e),
                     }
                 }
             }
@@ -49,37 +53,31 @@ fn recv_routine(
     socket: Arc<Mutex<UnixStream>>,
 ) -> Result<(), ()> {
     let recv_helper = |buf: &mut [u8]| {
-        let r = socket.lock().read_exact(buf);
-        match r {
-            Ok(_) => Ok(true),
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::UnexpectedEof => Err(()),
-                std::io::ErrorKind::WouldBlock => Ok(false), // spurious wakeup
-                e => panic!(e),
-            },
+        let mut read = 0;
+        while read < buf.len() {
+            // NOTE: Never replace r directly into match.
+            // If then, the mutex will be locked during the whole match statement!
+            let r = socket.lock().read(buf);
+            match r {
+                Ok(x) => read += x,
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::UnexpectedEof => return Err(()),
+                    std::io::ErrorKind::WouldBlock => read_signal.recv().unwrap().map_err(|_| ())?, // spurious wakeup
+                    e => panic!(e),
+                },
+            }
         }
+        assert_eq!(read, buf.len());
+        Ok(())
     };
     loop {
-        let size;
-        loop {
-            read_signal.recv().unwrap()?;
-            let mut size_buf = [0 as u8; 8];
-            if recv_helper(&mut size_buf)? {
-                size = usize::from_be_bytes(size_buf);
-                break
-            }
-        }
-        assert_ne!(size, 0);
-        // TODO: avoid useless zero fill
-        let mut result: Vec<u8> = vec![0; size];
+        let mut size_buf = [0 as u8; 8];
+        recv_helper(&mut size_buf)?;
+        let size = usize::from_be_bytes(size_buf);
 
-        loop {
-            if recv_helper(&mut result[0..])? {
-                break
-            }
-            // we wait later this time, since the preceeding polling might be upto this recv.
-            read_signal.recv().unwrap()?;
-        }
+        assert_ne!(size, 0);
+        let mut result: Vec<u8> = vec![0; size];
+        recv_helper(&mut result)?;
         queue.send(result).map_err(|_| ())?;
     }
 }
@@ -93,7 +91,12 @@ fn poll_routine(
     // TODO: does the capacity matter?
     let mut events = Events::with_capacity(100);
     loop {
-        poll.poll(&mut events, None).unwrap();
+        if let Err(e) = poll.poll(&mut events, None) {
+            if e.kind() != std::io::ErrorKind::Interrupted {
+                // interrupt frequently happens while debugging.
+                panic!(e);
+            }
+        }
         for event in events.iter() {
             assert_eq!(events.iter().next().unwrap().token(), POLL_TOKEN, "Invalid socket event");
 
@@ -131,7 +134,7 @@ struct SocketInternal {
 impl Drop for SocketInternal {
     fn drop(&mut self) {
         self.exit_flag.store(true, Ordering::Relaxed);
-        self.socket.lock().shutdown(std::net::Shutdown::Both).unwrap();
+        self.socket.lock().shutdown(std::net::Shutdown::Read).unwrap();
         self._send_thread.take().unwrap().join().unwrap();
         self._recv_thread.take().unwrap().join().unwrap();
         self._poll_thread.take().unwrap().join().unwrap();
@@ -225,7 +228,7 @@ pub struct Terminator(Arc<SocketInternal>);
 impl Terminate for Terminator {
     fn terminate(&self) {
         self.0.exit_flag.store(true, Ordering::Relaxed);
-        if let Err(e) = (self.0).socket.lock().shutdown(std::net::Shutdown::Both) {
+        if let Err(e) = (self.0).socket.lock().shutdown(std::net::Shutdown::Read) {
             assert_eq!(e.kind(), std::io::ErrorKind::NotConnected);
         }
     }
@@ -315,7 +318,7 @@ fn f123() {
 
     let huge_data = {
         let mut v = Vec::new();
-        for i in 0..300 {
+        for i in 0..300000 {
             v.push((i % 255) as u8)
         }
         v
