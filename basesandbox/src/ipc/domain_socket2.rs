@@ -57,7 +57,7 @@ fn recv_routine(
         while read < buf.len() {
             // NOTE: Never replace r directly into match.
             // If then, the mutex will be locked during the whole match statement!
-            let r = socket.lock().read(buf);
+            let r = socket.lock().read(&mut buf[read..]);
             match r {
                 Ok(x) => read += x,
                 Err(e) => match e.kind() {
