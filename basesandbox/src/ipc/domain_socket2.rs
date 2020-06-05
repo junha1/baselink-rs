@@ -59,7 +59,7 @@ fn recv_routine(
             // If then, the mutex will be locked during the whole match statement!
             let r = socket.lock().read(&mut buf[read..]);
             match r {
-                Ok(x) => read += x,
+                Ok(x) => if x == 0 { return Err(()) } else {read += x},
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::UnexpectedEof => return Err(()),
                     std::io::ErrorKind::WouldBlock => read_signal.recv().unwrap().map_err(|_| ())?, // spurious wakeup
@@ -88,7 +88,7 @@ fn poll_routine(
     recv_signal: Sender<Result<(), ()>>,
     mut poll: Poll,
 ) {
-    // TODO: does the capacity matter?
+    // TODO: does the capacity matter if it's 1?
     let mut events = Events::with_capacity(100);
     loop {
         if let Err(e) = poll.poll(&mut events, None) {
@@ -114,9 +114,11 @@ fn poll_routine(
                 return
             }
             if event.is_writable() {
-                write_signal.send(Ok(())).map_err(|_| ()).or(exit).unwrap();
+                // we don't really care if it succeeds, especially in the termination phase.
+                write_signal.send(Ok(())).ok();
             }
             if event.is_readable() {
+                // ditto.
                 recv_signal.send(Ok(())).map_err(|_| ()).or(exit).unwrap();
             }
         }
@@ -134,7 +136,9 @@ struct SocketInternal {
 impl Drop for SocketInternal {
     fn drop(&mut self) {
         self.exit_flag.store(true, Ordering::Relaxed);
-        self.socket.lock().shutdown(std::net::Shutdown::Read).unwrap();
+        if let Err(e) = self.socket.lock().shutdown(std::net::Shutdown::Read) {
+            assert_eq!(e.kind(), std::io::ErrorKind::NotConnected);
+        }
         self._send_thread.take().unwrap().join().unwrap();
         self._recv_thread.take().unwrap().join().unwrap();
         self._poll_thread.take().unwrap().join().unwrap();

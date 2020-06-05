@@ -30,8 +30,8 @@ type IpcScheme = cbsb::ipc::domain_socket2::DomainSocket; //cbsb::ipc::servo_cha
 // CI server is really slow for this. Usually 10 is ok.
 const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10000);
 
-fn simple_thread(args: Vec<String>) {
-    let ctx = executee::start::<Intra>(args);
+fn simple_thread<I: Ipc + 'static>(args: Vec<String>) {
+    let ctx = executee::start::<I>(args);
     let r = ctx.ipc.as_ref().unwrap().recv(Some(TIMEOUT)).unwrap();
     assert_eq!(r, b"Hello?\0");
     ctx.ipc.as_ref().unwrap().send(b"I'm here!\0");
@@ -56,14 +56,21 @@ fn execute_simple_intra() {
     // Note that cargo unit tests might share global static variable.
     // You must use unique name per execution
     let name = cbsb::ipc::generate_random_name();
-    executor::add_function_pool(name.clone(), Arc::new(simple_thread));
+    executor::add_function_pool(name.clone(), Arc::new(simple_thread::<Intra>));
     simple_executor::<Intra, executor::PlainThread>(&name);
+}
+
+#[test]
+fn execute_simple_intra_socket() {
+    let name = cbsb::ipc::generate_random_name();
+    executor::add_function_pool(name.clone(), Arc::new(simple_thread::<IpcScheme>));
+    simple_executor::<IpcScheme, executor::PlainThread>(&name);
 }
 
 #[test]
 fn execute_simple_multiple() {
     let name_source = cbsb::ipc::generate_random_name();
-    executor::add_function_pool(name_source.clone(), Arc::new(simple_thread));
+    executor::add_function_pool(name_source.clone(), Arc::new(simple_thread::<Intra>));
 
     let t1 = thread::spawn(|| simple_executor::<IpcScheme, executor::Executable>("./../target/debug/test_simple_rs"));
     let t2 = thread::spawn(|| simple_executor::<IpcScheme, executor::Executable>("./../target/debug/test_simple_rs"));
@@ -87,7 +94,7 @@ fn execute_simple_multiple() {
 #[test]
 fn execute_simple_intra_complicated() {
     let name = cbsb::ipc::generate_random_name();
-    executor::add_function_pool(name.clone(), Arc::new(simple_thread));
+    executor::add_function_pool(name.clone(), Arc::new(simple_thread::<Intra>));
     let ctx1 = executor::execute::<Intra, executor::PlainThread>(&name).unwrap();
     let ctx2 = executor::execute::<Intra, executor::PlainThread>(&name).unwrap();
 
@@ -106,7 +113,7 @@ fn execute_simple_intra_complicated() {
 #[test]
 fn execute_simple_intra_massive() {
     let name = cbsb::ipc::generate_random_name();
-    executor::add_function_pool(name.clone(), Arc::new(simple_thread));
+    executor::add_function_pool(name.clone(), Arc::new(simple_thread::<Intra>));
 
     let mut threads = Vec::new();
     for _ in 0..32 {
@@ -254,4 +261,37 @@ fn multiplexer() {
     // we have to drop the multiplexer itself first
     drop(multiplxer1);
     drop(multiplxer2);
+}
+
+#[test]
+fn bidirection() {
+    let n = 10;
+    let (d1, d2) = setup_ipc::<IpcScheme>();
+    let (s1, r1) = d1.split();
+    let (s2, r2) = d2.split();
+
+    fn fun_recv(n: usize, recv: impl IpcRecv) {
+        for i in 0..n {
+            let r = recv.recv(None).unwrap();
+            assert!(r.iter().all(|&x| x == (i % 256) as u8));
+        }
+    }
+
+    fn fun_send(n: usize, send: impl IpcSend) {
+        for i in 0..n {
+            let data = vec![(i % 256) as u8; 300000];
+            send.send(&data);
+            thread::sleep(std::time::Duration::from_millis(10))
+        }
+    }
+
+    let t1 = thread::spawn(move || fun_recv(n, r1));
+    let t2 = thread::spawn(move || fun_recv(n, r2));
+    let t3 = thread::spawn(move || fun_send(n, s1));
+    let t4 = thread::spawn(move || fun_send(n, s2));
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+    t3.join().unwrap();
+    t4.join().unwrap();
 }
