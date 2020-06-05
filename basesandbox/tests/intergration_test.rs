@@ -25,7 +25,7 @@ use cbsb::ipc::{IpcRecv, IpcSend, Terminate};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-type IpcScheme = cbsb::ipc::servo_channel::ServoChannel;
+type IpcScheme = cbsb::ipc::domain_socket2::DomainSocket; //cbsb::ipc::servo_channel::ServoChannel;
 
 // CI server is really slow for this. Usually 10 is ok.
 const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(10000);
@@ -154,7 +154,7 @@ fn terminator_socket() {
     let t = thread::spawn(move || {
         assert_eq!(d1.recv(None).unwrap(), vec![1, 2, 3]);
         barrier_.wait();
-        assert_eq!(d1.recv(None).unwrap_err(), cbsb::ipc::RecvError::Termination)
+        assert_eq!(d1.recv(None).unwrap_err(), cbsb::ipc::RecvError::Termination);
     });
     d2.send(&[1, 2, 3]);
     barrier.wait();
@@ -183,7 +183,7 @@ fn terminator_intra() {
 /// will make the send() cause the "Resource temporarily unavailable" error.
 #[test]
 fn socket_must_block() {
-    let n = 200;
+    let n = 1000;
     let packet_size = 3000;
     let (d1, d2) = setup_ipc::<IpcScheme>();
     let terminator = d1.create_terminator();
@@ -193,16 +193,12 @@ fn socket_must_block() {
         for i in 0..n {
             let r = d1.recv(None).unwrap();
             assert!(r.iter().all(|&x| x == (i % 256) as u8));
-            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         barrier_.wait();
         assert_eq!(d1.recv(None).unwrap_err(), cbsb::ipc::RecvError::Termination);
     });
     for i in 0..n {
-        let mut data = Vec::<u8>::with_capacity(packet_size);
-        for _ in 0..packet_size {
-            data.push((i % 256) as u8);
-        }
+        let mut data = vec![(i % 256) as u8; packet_size];
         d2.send(&data);
     }
     barrier.wait();

@@ -15,12 +15,13 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub mod domain_socket;
+pub mod domain_socket2;
 pub mod intra;
 pub mod servo_channel;
 
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
-pub use remote_trait::ipc::*;
+pub use remote_trait_object::ipc::*;
 
 pub trait Ipc: IpcSend + IpcRecv {
     /// Generate two configurations
