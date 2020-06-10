@@ -148,7 +148,7 @@ fn poll_routine(
             assert_eq!(events.iter().next().unwrap().token(), POLL_TOKEN, "Invalid socket event");
 
             // If it is going to exit, it's ok to fail to send signal (some spurious signals come)
-            let exit = if exit_flag.load(Ordering::Relaxed) {
+            let exit = if exit_flag.load(Ordering::SeqCst) {
                 Ok(())
             } else {
                 Err(())
@@ -182,7 +182,7 @@ struct SocketInternal {
 
 impl Drop for SocketInternal {
     fn drop(&mut self) {
-        self.exit_flag.store(true, Ordering::Relaxed);
+        self.exit_flag.store(true, Ordering::SeqCst);
         if let Err(e) = self.socket.lock().shutdown(std::net::Shutdown::Read) {
             assert_eq!(e.kind(), std::io::ErrorKind::NotConnected);
         }
@@ -299,7 +299,7 @@ pub struct Terminator {
 
 impl Terminate for Terminator {
     fn terminate(&self) {
-        self.socket.exit_flag.store(true, Ordering::Relaxed);
+        self.socket.exit_flag.store(true, Ordering::SeqCst);
         if let Err(e) = self.socket.socket.lock().shutdown(std::net::Shutdown::Read) {
             assert_eq!(e.kind(), std::io::ErrorKind::NotConnected);
         }

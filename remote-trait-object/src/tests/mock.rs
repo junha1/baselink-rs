@@ -16,83 +16,54 @@
 
 // Mock functions for the dispatcher / method stubs
 
-use crate as remote_trait_object;
-
+use crate::*;
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
-use remote_trait_object::*;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-thread_local!(static INSTANCE_KEY: Cell<u32> = Cell::new(0));
+type DeleteQueue = VecDeque<ServiceObjectId>;
+type DeleteRequestQueue = VecDeque<ServiceObjectId>;
+type RegisterQueue = VecDeque<Arc<dyn Service>>;
 
-pub fn set_key(key: u32) {
-    INSTANCE_KEY.with(|k| {
-        assert_eq!(k.get(), 0);
-        k.set(key);
-    })
+const TEST_OBJECT_ID: ServiceObjectId = ServiceObjectId {
+    index: 1234,
+};
+
+#[derive(Default)]
+pub struct TestPort {
+    log_delete: RwLock<DeleteQueue>,
+    log_delete_request: RwLock<DeleteQueue>,
+    log_service: RwLock<RegisterQueue>,
 }
 
-fn get_key() -> u32 {
-    INSTANCE_KEY.with(|k| {
-        assert_ne!(k.get(), 0);
-        k.get()
-    })
-}
-
-type LogQueue = VecDeque<Vec<u8>>;
-static LOG: OnceCell<RwLock<HashMap<u32, LogQueue>>> = OnceCell::new();
-type ServiceLogQueue = VecDeque<Arc<dyn Service>>;
-static SERVICE_LOG: OnceCell<RwLock<HashMap<u32, ServiceLogQueue>>> = OnceCell::new();
-
-fn push_log(s: Vec<u8>) {
-    let mut guard = LOG.get_or_init(Default::default).write();
-    if let Some(queue) = guard.get_mut(&get_key()) {
-        queue.push_back(s)
-    } else {
-        guard.insert(get_key(), VecDeque::new());
-        drop(guard);
-        push_log(s);
+impl Port for TestPort {
+    fn call(&self, handle: ServiceObjectId, method: MethodId, data: Vec<u8>) -> Vec<u8> {
+        panic!("Dummy Call")
     }
-}
-pub fn pop_log() -> Vec<u8> {
-    LOG.get_or_init(Default::default).write().remove(&get_key()).unwrap().pop_front().unwrap()
-}
 
-fn push_service_log(s: Arc<dyn Service>) {
-    let mut guard = SERVICE_LOG.get_or_init(Default::default).write();
-    if let Some(queue) = guard.get_mut(&get_key()) {
-        queue.push_back(s)
-    } else {
-        guard.insert(get_key(), VecDeque::new());
-        drop(guard);
-        push_service_log(s);
+    fn delete_request(&self, id: ServiceObjectId) {
+        self.log_delete_request.write().push_back(id);
     }
-}
-pub fn pop_service_log() -> Arc<dyn Service> {
-    SERVICE_LOG.get_or_init(Default::default).write().remove(&get_key()).unwrap().pop_front().unwrap()
-}
 
-// We define this instead of std::default::Default because of the orphan rule.
-pub trait TestDefault {
-    fn default() -> Self;
-}
+    fn delete(&self, id: ServiceObjectId) {
+        self.log_delete.write().push_back(id);
+    }
 
-pub fn register(port_id: PortId, handle_to_register: Arc<dyn Service>) -> HandleInstance {
-    push_log(serde_cbor::to_vec(&("register", port_id)).unwrap());
-    push_service_log(handle_to_register);
-    Default::default()
-}
-pub fn call<S: serde::Serialize + std::fmt::Debug, D: serde::de::DeserializeOwned + TestDefault>(
-    handle: &HandleInstance,
-    method: MethodId,
-    args: &S,
-) -> D {
-    push_log(serde_cbor::to_vec(&("call", handle, method, args)).unwrap());
-    TestDefault::default()
-}
-pub fn delete(handle: &HandleInstance) {
-    push_log(serde_cbor::to_vec(&("delete", handle)).unwrap());
+    fn dispatch(
+        &self,
+        handle: ServiceObjectId,
+        method: MethodId,
+        arguments: &[u8],
+        return_buffer: std::io::Cursor<&mut Vec<u8>>,
+    ) {
+        panic!()
+    }
+
+    fn register(&self, handle_to_register: Arc<dyn Service>) -> ServiceObjectId {
+        self.log_service.write().push_back(handle_to_register);
+        TEST_OBJECT_ID
+    }
 }

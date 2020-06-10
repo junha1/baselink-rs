@@ -21,8 +21,9 @@ use crate::services::*;
 use impls::*;
 use parking_lot::{Condvar, Mutex};
 use remote_trait_object::*;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
+#[derive(Debug)]
 pub struct MyContext {
     number: usize,
     map: Mutex<AvailiableMap>,
@@ -30,36 +31,27 @@ pub struct MyContext {
     cvar: Condvar,
 }
 
-context_provider! {MyContext}
-pub fn get_context() -> &'static MyContext {
-    context_provider_mod::get()
-}
-pub fn set_context(ctx: MyContext) {
-    context_provider_mod::set(ctx)
-}
-pub fn remove_context() {
-    context_provider_mod::remove()
+pub struct MyBootstrap {
+    ctx: Arc<MyContext>,
 }
 
-pub fn initializer() {
-    let config = get_module_config();
-    let (number, threads): (usize, usize) = serde_cbor::from_slice(&config.args).unwrap();
-    let map = new_avail_map(number, threads);
-    set_context(MyContext {
-        number,
-        map: Mutex::new(map),
-        lock: Mutex::new(true),
-        cvar: Condvar::new(),
-    });
-}
+impl Bootstrap for MyBootstrap {
+    fn new(config: &Config) -> Self {
+        let (number, threads): (usize, usize) = serde_cbor::from_slice(&config.args).unwrap();
+        let map = new_avail_map(number, threads);
+        MyBootstrap {
+            ctx: Arc::new(MyContext {
+                number,
+                map: Mutex::new(map),
+                lock: Mutex::new(true),
+                cvar: Condvar::new(),
+            }),
+        }
+    }
 
-pub struct Preset;
-
-impl HandlePreset for Preset {
-    fn export() -> Vec<HandleExchange> {
-        let ctx = get_context();
+    fn export(&mut self, ports: &mut PortTable) -> Vec<HandleExchange> {
         let mut result = Vec::new();
-        for i in 0..ctx.number {
+        for i in 0..self.ctx.number {
             let importer = format!("Module{}", i);
 
             result.push(HandleExchange {
@@ -67,9 +59,10 @@ impl HandlePreset for Preset {
                 importer: importer.clone(),
                 handles: vec![service_export!(
                     Schedule,
-                    find_port_id(&importer).unwrap(),
+                    ports.get(&importer).unwrap().get_port(),
                     Arc::new(MySchedule {
                         handle: Default::default(),
+                        ctx: self.ctx.clone()
                     })
                 )],
                 argument: Vec::new(),
@@ -78,21 +71,21 @@ impl HandlePreset for Preset {
         result
     }
 
-    fn import(_exchange: HandleExchange) {
+    fn import(&mut self, _port: Weak<dyn Port>, _exchange: HandleExchange) {
         panic!("Nothing to import!")
+    }
+
+    fn debug(&self, _arg: &[u8]) -> Vec<u8> {
+        panic!("Nothing to debug!")
     }
 }
 
-#[cfg(feature = "single_process")]
+#[cfg(not(feature = "process"))]
 pub fn main_like(args: Vec<String>) {
-    run_control_loop::<cbsb::ipc::intra::Intra, Preset>(args, Box::new(initializer), None);
-    remove_context();
-    remote_trait_object::global::remove();
+    run_control_loop::<cbsb::ipc::intra::Intra, MyBootstrap>(args);
 }
 
-#[cfg(not(feature = "single_process"))]
+#[cfg(feature = "process")]
 pub fn main_like(args: Vec<String>) {
-    run_control_loop::<crate::module_library::DefaultIpc, Preset>(args, Box::new(initializer), None);
-    remove_context();
-    remote_trait_object::global::remove();
+    run_control_loop::<crate::module_library::DefaultIpc, MyBootstrap>(args);
 }

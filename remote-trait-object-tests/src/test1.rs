@@ -66,10 +66,9 @@ pub fn run<I: Ipc + 'static + LinkMessage, E: Executor + 'static>(mod_path: &str
 }
 
 use super::*;
-use crate::key::{end_test, start_test};
+use crate::module_library::DefaultIpc;
 use cbsb::execution::executor::{Executable, PlainThread};
 use cbsb::ipc::intra::Intra;
-use crate::module_library::DefaultIpc;
 
 fn register() -> String {
     let name = cbsb::ipc::generate_random_name();
@@ -83,10 +82,7 @@ fn register() -> String {
 fn hello1() {
     let name = register();
     for _ in 0..4 {
-        let k = start_test();
-
         run::<Intra, PlainThread>(&name, 8, 6);
-        end_test(k);
     }
 }
 
@@ -94,9 +90,7 @@ fn hello1() {
 fn hello2() {
     let name = register();
     for _ in 0..4 {
-        let k = start_test();
         run::<Intra, PlainThread>(&name, 8, 5);
-        end_test(k);
     }
 }
 
@@ -104,9 +98,7 @@ fn hello2() {
 fn hello3() {
     let name = register();
     for _ in 0..4 {
-        let k = start_test();
         run::<Intra, PlainThread>(&name, 8, 4);
-        end_test(k);
     }
 }
 
@@ -114,26 +106,20 @@ fn hello3() {
 fn hello4() {
     let name = register();
     for _ in 0..4 {
-        let k = start_test();
         run::<Intra, PlainThread>(&name, 8, 3);
-        end_test(k);
     }
 }
 
 #[test]
 fn hello_binary1() {
     for _ in 0..3 {
-        let k = start_test();
         run::<DefaultIpc, Executable>("./../target/debug/test_mod_hello_rs", 8, 6);
-        end_test(k);
     }
 }
 
 #[test]
 fn hello_binary2() {
     for _ in 0..3 {
-        let k = start_test();
         run::<DefaultIpc, Executable>("./../target/debug/test_mod_hello_rs", 8, 4);
-        end_test(k);
     }
 }

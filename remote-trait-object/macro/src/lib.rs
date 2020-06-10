@@ -17,6 +17,10 @@
 #[macro_use]
 extern crate quote;
 
+fn create_env_path() -> syn::Path {
+    syn::parse2(quote! {remote_trait_object::macro_env}).unwrap()
+}
+
 mod helper;
 mod service;
 mod service_impl;

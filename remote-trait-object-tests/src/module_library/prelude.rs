@@ -14,4 +14,4 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub use remote_trait_object::{HandleInstance, SArc};
+pub use remote_trait_object::{HandleInstance, SArc, Service};

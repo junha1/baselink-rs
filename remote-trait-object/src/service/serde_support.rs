@@ -15,17 +15,49 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::*;
-use crate::port::server::port_thread_local;
 pub use intertrait::{cast::CastBox, Caster};
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
+
+/// This manages thread-local keys for port, which will be used in serialization of
+/// SArc. Note that this is required even in the inter-process setup.
+/// TODO: check that serde doens't spawn a thread while serializing.
+pub mod port_thread_local {
+    use super::*;
+    use std::cell::RefCell;
+
+    // TODO
+    // If a service call another service, this PORT setting might be stacked (at most twice).
+    // We check that the consistency of stacking for an assertion purpose.
+    // However it might be costly considering the frequency of this operations,
+    // so please replace this with unchecking logic
+    // after the library becomes stabilized.
+    thread_local!(static PORT: RefCell<Vec<Weak<dyn Port>>> = RefCell::new(Vec::new()));
+
+    pub fn set_port(port: Weak<dyn Port>) {
+        PORT.with(|k| {
+            k.try_borrow_mut().unwrap().push(port);
+            assert!(k.borrow().len() <= 2);
+        })
+    }
+
+    pub fn get_port() -> Weak<dyn Port> {
+        PORT.with(|k| k.borrow().last().unwrap().clone())
+    }
+
+    pub fn remove_port() {
+        PORT.with(|k| {
+            k.try_borrow_mut().unwrap().pop().unwrap();
+        })
+    }
+}
 
 impl<T: ?Sized + Service + ExportService<T>> Serialize for SArc<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer, {
         let service = self.take();
-        let handle = T::export(port_thread_local::get_key(), service);
+        let handle = T::export(port_thread_local::get_port(), service);
         handle.serialize(serializer)
     }
 }
@@ -34,7 +66,7 @@ impl<'de, T: ?Sized + Service + ImportService<T>> Deserialize<'de> for SArc<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>, {
-        let handle = HandleInstance::deserialize(deserializer)?;
-        Ok(SArc::new(T::import(handle)))
+        let handle = HandleToExchange::deserialize(deserializer)?;
+        Ok(SArc::new(T::import(port_thread_local::get_port(), handle)))
     }
 }

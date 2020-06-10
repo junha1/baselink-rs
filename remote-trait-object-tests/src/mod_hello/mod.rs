@@ -22,59 +22,56 @@ use impls::*;
 use parking_lot::RwLock;
 use remote_trait_object::*;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 pub struct MyContext {
     number: usize,
     factories: RwLock<HashMap<String, Arc<dyn HelloFactory>>>,
+    config: Config,
 }
 
-context_provider! {MyContext}
-pub fn get_context() -> &'static MyContext {
-    context_provider_mod::get()
-}
-pub fn set_context(ctx: MyContext) {
-    context_provider_mod::set(ctx)
-}
-pub fn remove_context() {
-    context_provider_mod::remove()
+pub struct MyBootstrap {
+    ctx: Arc<MyContext>,
 }
 
-pub fn initializer() {
-    let config = get_module_config();
-    let number = serde_cbor::from_slice(&config.args).unwrap();
-    let mut factories = HashMap::new();
-    factories.insert(
-        config.id.clone(),
-        Arc::new(Factory {
-            handle: Default::default(),
-        }) as Arc<dyn HelloFactory>,
-    );
-    set_context(MyContext {
-        number,
-        factories: RwLock::new(factories),
-    });
-}
+impl Bootstrap for MyBootstrap {
+    fn new(config: &Config) -> Self {
+        let number = serde_cbor::from_slice(&config.args).unwrap();
+        let mut factories = HashMap::new();
+        factories.insert(
+            config.id.clone(),
+            Arc::new(Factory {
+                handle: Default::default(),
+            }) as Arc<dyn HelloFactory>,
+        );
 
-pub struct Preset;
+        MyBootstrap {
+            ctx: Arc::new(MyContext {
+                number,
+                factories: RwLock::new(factories),
+                config: config.clone(),
+            }),
+        }
+    }
 
-impl HandlePreset for Preset {
-    fn export() -> Vec<HandleExchange> {
-        let ctx = get_context();
+    fn export(&mut self, ports: &mut PortTable) -> Vec<HandleExchange> {
         let mut result = Vec::new();
-        for i in 0..ctx.number {
-            let exporter = get_module_config().id.clone();
+        for i in 0..self.ctx.number {
+            let exporter = self.ctx.config.id.clone();
             let importer = format!("Module{}", i);
             if exporter == importer {
                 continue
             }
+
+            let x = ports.get(&importer).unwrap().get_port();
+            assert_ne!(x.strong_count(), 0);
 
             result.push(HandleExchange {
                 exporter,
                 importer: importer.clone(),
                 handles: vec![service_export!(
                     HelloFactory,
-                    find_port_id(&importer).unwrap(),
+                    ports.get(&importer).unwrap().get_port(),
                     Arc::new(Factory {
                         handle: Default::default(),
                     })
@@ -85,44 +82,34 @@ impl HandlePreset for Preset {
         result
     }
 
-    fn import(mut exchange: HandleExchange) {
-        let ctx = get_context();
-        assert_eq!(exchange.importer, get_module_config().id, "Invalid import request");
-        let mut guard = ctx.factories.write();
+    fn import(&mut self, port: Weak<dyn Port>, mut exchange: HandleExchange) {
+        assert_eq!(exchange.importer, self.ctx.config.id, "Invalid import request");
+        let mut guard = self.ctx.factories.write();
         assert_eq!(exchange.handles.len(), 1);
-        let h = service_import!(HelloFactory, exchange.handles.pop().unwrap());
+        let h = service_import!(HelloFactory, port, exchange.handles.pop().unwrap());
         guard.insert(exchange.exporter, h);
     }
-}
 
-pub fn initiate(_arg: Vec<u8>) -> Vec<u8> {
-    let ctx = get_context();
-    let guard = ctx.factories.read();
+    fn debug(&self, _arg: &[u8]) -> Vec<u8> {
+        let guard = self.ctx.factories.read();
 
-    for n in 0..ctx.number {
-        let factory = guard.get(&format!("Module{}", n)).unwrap();
-        for i in 0..10 {
-            let robot = factory.create(&format!("Robot{}", i)).unwrap();
-            assert_eq!(robot.hello(10 - i), format!("Robot{}{}", i, 10 - i));
+        for n in 0..self.ctx.number {
+            let factory = guard.get(&format!("Module{}", n)).unwrap();
+            for i in 0..10 {
+                let robot = factory.create(&format!("Robot{}", i)).unwrap();
+                assert_eq!(robot.hello(10 - i), format!("Robot{}{}", i, 10 - i));
+            }
         }
+        Vec::new()
     }
-    Vec::new()
 }
 
-#[cfg(feature = "single_process")]
+#[cfg(not(feature = "process"))]
 pub fn main_like(args: Vec<String>) {
-    run_control_loop::<cbsb::ipc::intra::Intra, Preset>(args, Box::new(initializer), Some(Box::new(initiate)));
-    remove_context();
-    remote_trait_object::global::remove();
+    run_control_loop::<cbsb::ipc::intra::Intra, MyBootstrap>(args);
 }
 
-#[cfg(not(feature = "single_process"))]
+#[cfg(feature = "process")]
 pub fn main_like(args: Vec<String>) {
-    run_control_loop::<crate::module_library::DefaultIpc, Preset>(
-        args,
-        Box::new(initializer),
-        Some(Box::new(initiate)),
-    );
-    remove_context();
-    remote_trait_object::global::remove();
+    run_control_loop::<crate::module_library::DefaultIpc, MyBootstrap>(args);
 }

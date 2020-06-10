@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use crate::create_env_path;
 use crate::service::MacroArgs;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use syn::Ident;
@@ -49,10 +50,12 @@ fn id_trait_setter_ident(the_trait: &syn::ItemTrait) -> Ident {
 
 pub fn generate_id_registeration(
     MacroArgs {
-        env_path,
+        ..
     }: &MacroArgs,
     the_trait: &syn::ItemTrait,
 ) -> Result<TokenStream2, TokenStream2> {
+    let env_path = create_env_path();
+
     let mut result = TokenStream2::new();
 
     let lit_trait_name = syn::LitStr::new(&format!("{}", the_trait.ident), Span::call_site());

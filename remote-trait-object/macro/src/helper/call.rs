@@ -15,16 +15,19 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::path_of_single_ident;
+use crate::create_env_path;
 use crate::service::MacroArgs;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::ToTokens;
 
 pub fn generate_imported_struct(
     MacroArgs {
-        env_path,
+        ..
     }: &MacroArgs,
     the_trait: &syn::ItemTrait,
 ) -> Result<TokenStream2, TokenStream2> {
+    let env_path = create_env_path();
+
     let trait_ident = the_trait.ident.clone();
     let struct_ident = quote::format_ident!("{}Imported", trait_ident);
     let mut imported_struct = quote! {
@@ -77,7 +80,7 @@ pub fn generate_imported_struct(
         }
 
         let the_call = quote! {
-            #env_path::service_context::call(&self.handle, #id_ident.load(#env_path::ID_ORDERING), &#arguments_in_tuple)
+            self.handle.call(#id_ident.load(#env_path::ID_ORDERING), &#arguments_in_tuple)
         };
         the_method.block.stmts.push(syn::Stmt::Expr(syn::Expr::Verbatim(the_call)));
         imported_struct_impl.items.push(syn::ImplItem::Method(the_method));
@@ -98,13 +101,13 @@ pub fn generate_imported_struct(
         }
         impl Drop for #struct_ident {
             fn drop(&mut self) {
-                #env_path::service_context::delete(&self.handle)
+                self.handle.delete()
             }
         }
         impl #env_path::ImportService<dyn #trait_ident> for dyn #trait_ident {
-            fn import(handle: #env_path::HandleInstance) -> std::sync::Arc<dyn #trait_ident>  {
+            fn import(port: std::sync::Weak<dyn #env_path::Port>, handle: #env_path::HandleToExchange) -> std::sync::Arc<dyn #trait_ident>  {
                 std::sync::Arc::new(#struct_ident  {
-                    handle,
+                    handle: #env_path::HandleInstance::careful_new(port, handle)
                 })
             }
         }

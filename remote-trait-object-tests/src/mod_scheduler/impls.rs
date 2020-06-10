@@ -14,28 +14,30 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use super::get_context;
+use super::MyContext;
 use crate::module_library::prelude::*;
 use crate::services::*;
+use std::sync::Arc;
 
 #[remote_trait_object_macro::service_impl(Schedule)]
 pub struct MySchedule {
     pub handle: HandleInstance,
+    pub ctx: Arc<MyContext>,
 }
 
 impl Schedule for MySchedule {
     fn get(&self) -> AvailiableMap {
-        let mut avail = get_context().lock.lock();
+        let mut avail = self.ctx.lock.lock();
         while !*avail {
-            get_context().cvar.wait(&mut avail);
+            self.ctx.cvar.wait(&mut avail);
         }
         *avail = false;
-        get_context().map.lock().clone()
+        self.ctx.map.lock().clone()
     }
 
     fn set(&self, s: AvailiableMap) {
-        *get_context().map.lock() = s;
-        *get_context().lock.lock() = true;
-        get_context().cvar.notify_one();
+        *self.ctx.map.lock() = s;
+        *self.ctx.lock.lock() = true;
+        self.ctx.cvar.notify_one();
     }
 }

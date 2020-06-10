@@ -45,6 +45,7 @@ impl ServiceObjectTable {
 
     pub fn create(&mut self, mut x: Arc<dyn Service>) -> Arc<dyn Service> {
         let token = self.token.pop(Some(TIMEOUT)).expect("Too many handle service object created");
+        assert_ne!(x.get_handle().port.strong_count(), 0);
         Arc::get_mut(&mut x).unwrap().get_handle_mut().id.index = token as u16;
         let slot = &mut self.handles[token];
         assert!(slot.is_none(), "ServiceObjectTable corrupted");

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use super::get_context;
+use super::MyContext;
 use crate::module_library::prelude::*;
 use crate::services::*;
 use std::sync::Arc;
@@ -22,12 +22,14 @@ use std::sync::Arc;
 #[remote_trait_object_macro::service_impl(RelayerFactory)]
 pub struct OrdinaryFactory {
     pub handle: HandleInstance,
+    pub ctx: Arc<MyContext>,
 }
 
 impl RelayerFactory for OrdinaryFactory {
     fn create(&self, key: String, current: usize, destination: String) -> SArc<dyn RelayerMachine> {
         SArc::new(Arc::new(OrdinaryMachine {
             handle: Default::default(),
+            ctx: self.ctx.clone(),
             key,
             current: current + 1,
             destination,
@@ -36,7 +38,7 @@ impl RelayerFactory for OrdinaryFactory {
 
     /// Returns name of the next module to visit
     fn ask_path(&self, key: String, current: usize) -> Answer {
-        let guard_answers = get_context().answers.read();
+        let guard_answers = self.ctx.answers.read();
         let entry = guard_answers.get(&key).unwrap();
         if current == entry.0.len() - 1 {
             Answer::End(entry.1.clone())
@@ -49,6 +51,7 @@ impl RelayerFactory for OrdinaryFactory {
 #[remote_trait_object_macro::service_impl(RelayerMachine)]
 pub struct OrdinaryMachine {
     pub handle: HandleInstance,
+    pub ctx: Arc<MyContext>,
     pub key: String,
     pub current: usize,
     pub destination: String,
@@ -56,7 +59,7 @@ pub struct OrdinaryMachine {
 
 impl RelayerMachine for OrdinaryMachine {
     fn run(&self) -> String {
-        let guard_factory = get_context().factories.read();
+        let guard_factory = self.ctx.factories.read();
         match guard_factory.get(&self.destination).unwrap().ask_path(self.key.clone(), self.current) {
             Answer::Next(x) => guard_factory
                 .get(&x)

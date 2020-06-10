@@ -21,21 +21,26 @@ use syn::punctuated::Punctuated;
 use syn::Token;
 
 pub struct MacroArgs {
-    pub env_path: syn::Path,
+    pub serde_path: syn::Path,
 }
 
 impl Parse for MacroArgs {
     fn parse(input: ParseStream) -> syn::parse::Result<Self> {
+        let err_msg = "You must supply one argument (encdoing scheme path).
+        Such path must represent a namespace that contains two function
+        fn to_writer<W, T>(writer: W, value: &T) -> Result<()> where W: Write, T: Serialize 
+        fn from_reader<T, R>(reader: R) -> Result<T> where T: DeserializeOwned, R: Read";
+
         if input.is_empty() {
-            return Err(input.error("You must supply one argument (env Path)"))
+            return Err(input.error(err_msg))
         }
         let mut args = Punctuated::<syn::Path, Token![,]>::parse_terminated(input)?;
         if args.len() != 1 {
-            return Err(input.error("You must supply one argument (env Path)"))
+            return Err(input.error(err_msg))
         }
-        let env_path = args.pop().unwrap().into_value();
+        let serde_path = args.pop().unwrap().into_value();
         Ok(MacroArgs {
-            env_path,
+            serde_path,
         })
     }
 }
@@ -84,7 +89,7 @@ pub fn service(args: TokenStream2, input: TokenStream2) -> TokenStream2 {
     if !args.is_empty() {
         return syn::Error::new_spanned(input, "#[service] does not take any argument").to_compile_error()
     }
-    service_adv(quote! {remote_trait_object::env}, input)
+    service_adv(quote! {serde_cbor}, input)
 }
 
 #[cfg(test)]

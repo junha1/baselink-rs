@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-mod context;
 pub mod ipc;
 mod port;
 pub mod queue;
@@ -26,34 +25,27 @@ mod tests;
 #[macro_use]
 extern crate intertrait;
 
-pub use context::{
-    global, single_process_support::get_key, single_process_support::set_key, termination, InstanceKey, PortTable,
-    RtoConfig,
-};
-pub use port::{PacketHeader, Port, PortId};
-pub use service::id::{setup_identifiers, IdMap};
-pub use service::SArc;
-pub use service::{
-    dispatch::PortDispatcher, dispatch::ServiceDispatcher, HandleInstance, MethodId, Service, ServiceObjectId, TraitId,
-};
-
-/// You should not import this! This is for the auto-generated code
-pub mod env {
-    pub use crate::context::global;
-    pub use crate::port::{PacketHeader, Port, PortId};
-    pub use crate::service::dispatch::ServiceDispatcher;
-    pub use crate::service::id::{MID_REG, TID_REG};
-    pub use crate::service::service_context;
-    pub use crate::service::{DispatchService, ExportService, IdOfService, ImportService, SArc};
-    pub use crate::service::{HandleInstance, MethodId, MethodIdAtomic, Service, TraitId, TraitIdAtomic, ID_ORDERING};
+/// You (module implementor) should not refer this!
+pub mod macro_env {
+    use super::*;
+    pub use port::{PacketHeader, Port};
+    pub use service::id::{MethodIdAtomic, TraitIdAtomic, ID_ORDERING, MID_REG, TID_REG};
+    pub use service::{dispatch::ServiceDispatcher, DispatchService, ExportService, ImportService};
+    pub use service::{HandleInstance, HandleToExchange, IdOfService, MethodId, Service, TraitId};
 }
 
-/// You should not import this! This is for the auto-generated code
-pub mod env_mock {
-    pub use crate::context::global;
-    pub use crate::port::{PacketHeader, Port, PortId};
-    pub use crate::service::dispatch::ServiceDispatcher;
-    pub use crate::service::id::{MID_REG, TID_REG};
-    pub use crate::service::{DispatchService, ExportService, IdOfService, ImportService, SArc};
-    pub use crate::service::{HandleInstance, MethodId, MethodIdAtomic, Service, TraitId, TraitIdAtomic, ID_ORDERING};
+pub use port::{BasicPort, PacketHeader, Port, PortInstance};
+pub use service::id::*;
+pub use service::SArc;
+pub use service::{
+    dispatch::PortDispatcher, dispatch::ServiceDispatcher, ExportService, HandleInstance, HandleToExchange,
+    ImportService, MethodId, Service, ServiceObjectId, TraitId,
+};
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct RtoConfig {
+    /// Number of inbound call handlers
+    pub server_threads: usize,
+    /// Maximum outbound call slots
+    pub call_slots: usize,
 }

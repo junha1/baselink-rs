@@ -23,13 +23,12 @@ extern crate linkme;
 #[macro_use]
 extern crate intertrait;
 
-#[cfg(test)]
-mod key;
 mod mod_hello;
 mod mod_relayer;
 mod mod_scheduler;
 #[cfg(test)]
 mod module;
+#[macro_use]
 pub mod module_library;
 mod services;
 #[cfg(test)]

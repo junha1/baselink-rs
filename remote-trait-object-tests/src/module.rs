@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use crate::module_library::DefaultIpc;
 use crate::module_library::*;
 use cbsb::execution::executor::{self, Executor};
 use cbsb::ipc::generate_random_name;
 use cbsb::ipc::{intra::Intra, Ipc};
-use crate::module_library::DefaultIpc;
 use remote_trait_object::*;
 use std::collections::HashMap;
 
@@ -39,7 +39,7 @@ impl<I: Ipc, E: Executor> Module<I, E> {
         let config = Config {
             kind: generate_random_name(),
             id,
-            key: super::key::create_instance(),
+            key: 0,
             args,
         };
         let config_remote_trait_object = RtoConfig {
@@ -91,7 +91,6 @@ impl<I: Ipc, E: Executor> Drop for Module<I, E> {
     fn drop(&mut self) {
         self.send(&"terminate");
         self.ctx.take().unwrap().terminate();
-        super::key::return_instance(self.config.key);
     }
 }
 
@@ -138,22 +137,10 @@ pub fn link_all<I: Ipc + LinkMessage, E: Executor>(modules: &Modules<I, E>) {
             let link_message = <I as LinkMessage>::link_message();
 
             module1.send(&"link");
-            module1.send(&(
-                *port1,
-                *port2,
-                module2.config.id.clone(),
-                serde_cbor::to_vec(&link_message).unwrap(),
-                ipc_config1,
-            ));
+            module1.send(&(module2.config.id.clone(), serde_cbor::to_vec(&link_message).unwrap(), ipc_config1));
 
             module2.send(&"link");
-            module2.send(&(
-                *port2,
-                *port1,
-                module1.config.id.clone(),
-                serde_cbor::to_vec(&link_message).unwrap(),
-                ipc_config2,
-            ));
+            module2.send(&(module1.config.id.clone(), serde_cbor::to_vec(&link_message).unwrap(), ipc_config2));
 
             module1.done_ack();
             module2.done_ack();

@@ -74,10 +74,9 @@ pub fn run<I: Ipc + 'static + LinkMessage, E: Executor + 'static>(mod_relayer_pa
 }
 
 use super::*;
-use crate::key::{end_test, start_test};
+use crate::module_library::DefaultIpc;
 use cbsb::execution::executor::{Executable, PlainThread};
 use cbsb::ipc::intra::Intra;
-use crate::module_library::DefaultIpc;
 
 fn register() -> (String, String) {
     let name1 = cbsb::ipc::generate_random_name();
@@ -91,9 +90,7 @@ fn register() -> (String, String) {
 fn relay1() {
     let (mod_relayer_path, mod_scheduler_path) = register();
     for _ in 0..4 {
-        let k = start_test();
         run::<Intra, PlainThread>(&mod_relayer_path, &mod_scheduler_path);
-        end_test(k);
     }
 }
 
@@ -101,9 +98,7 @@ fn relay1() {
 fn relay2() {
     let (mod_relayer_path, mod_scheduler_path) = register();
     for _ in 0..4 {
-        let k = start_test();
         run::<Intra, PlainThread>(&mod_relayer_path, &mod_scheduler_path);
-        end_test(k);
     }
 }
 
@@ -111,32 +106,26 @@ fn relay2() {
 fn relay3() {
     let (mod_relayer_path, mod_scheduler_path) = register();
     for _ in 0..4 {
-        let k = start_test();
         run::<Intra, PlainThread>(&mod_relayer_path, &mod_scheduler_path);
-        end_test(k);
     }
 }
 
 #[test]
 fn relay_binary1() {
     for _ in 0..4 {
-        let k = start_test();
         run::<DefaultIpc, Executable>(
             "./../target/debug/test_mod_relayer_rs",
             "./../target/debug/test_mod_scheduler_rs",
         );
-        end_test(k);
     }
 }
 
 #[test]
 fn relay_binary2() {
     for _ in 0..4 {
-        let k = start_test();
         run::<DefaultIpc, Executable>(
             "./../target/debug/test_mod_relayer_rs",
             "./../target/debug/test_mod_scheduler_rs",
         );
-        end_test(k);
     }
 }

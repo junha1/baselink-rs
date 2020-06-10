@@ -14,16 +14,15 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use crate::create_env_path;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::Token;
 
-fn helper(
-    env_path: &syn::Path,
-    service_trait: &syn::Path,
-    source_struct: &syn::ItemStruct,
-) -> Result<TokenStream2, TokenStream2> {
+fn helper(service_trait: &syn::Path, source_struct: &syn::ItemStruct) -> Result<TokenStream2, TokenStream2> {
+    let env_path = create_env_path();
+
     let got_no_handle = (|| -> Result<bool, TokenStream2> {
         for field in &source_struct.fields {
             let ident = field.ident.as_ref().ok_or_else(|| {
@@ -66,22 +65,19 @@ fn helper(
 }
 
 struct MacroArgs {
-    env_path: syn::Path,
     service_trait: syn::Path,
 }
 impl Parse for MacroArgs {
     fn parse(input: ParseStream) -> syn::parse::Result<Self> {
         if input.is_empty() {
-            return Err(input.error("You must supply two arguments (env path, Trait)"))
+            return Err(input.error("You must supply one argument (Service trait)"))
         }
         let mut args = Punctuated::<syn::Path, Token![,]>::parse_terminated(input)?;
-        if args.len() != 2 {
-            return Err(input.error("You must supply two arguments (env path, Trait)"))
+        if args.len() != 1 {
+            return Err(input.error("You must supply one argument (Service trait)"))
         }
         let service_trait = args.pop().unwrap().into_value();
-        let env_path = args.pop().unwrap().into_value();
         Ok(MacroArgs {
-            env_path,
             service_trait,
         })
     }
@@ -97,12 +93,12 @@ pub fn service_impl_adv(args: TokenStream2, input: TokenStream2) -> TokenStream2
         }
     };
 
-    match helper(&args.env_path, &args.service_trait, &source_struct) {
+    match helper(&args.service_trait, &source_struct) {
         Ok(x) => x,
         Err(x) => x,
     }
 }
 
 pub fn service_impl(args: TokenStream2, input: TokenStream2) -> TokenStream2 {
-    service_impl_adv(quote! {remote_trait_object::env, #args}, input)
+    service_impl_adv(quote! {#args}, input)
 }

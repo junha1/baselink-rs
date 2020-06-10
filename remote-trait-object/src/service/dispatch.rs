@@ -15,9 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::table::ServiceObjectTable;
-use super::PortId;
-use super::{HandleInstance, MethodId, Service, ServiceObjectId, UNDECIDED_PORT};
-use crate::context;
+use super::{MethodId, Service, ServiceObjectId};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -33,19 +31,13 @@ pub trait ServiceDispatcher: Send + Sync {
 
 pub struct PortDispatcher {
     service_table: RwLock<ServiceObjectTable>,
-    id: PortId,
 }
 
 impl PortDispatcher {
-    pub fn new(id: PortId, size: usize) -> Self {
+    pub fn new(size: usize) -> Self {
         PortDispatcher {
             service_table: RwLock::new(ServiceObjectTable::new(size)),
-            id,
         }
-    }
-
-    pub fn get_id(&self) -> PortId {
-        self.id
     }
 
     pub fn dispatch(
@@ -57,48 +49,26 @@ impl PortDispatcher {
     ) {
         #[cfg(statistics)]
         {
-            crate::statistics::DISPATCH_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            crate::statistics::DISPATCH_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
         let service_object = self.service_table.read().get(handle.index as usize);
+        assert_ne!(service_object.get_handle().port.strong_count(), 0);
+
         // NOTE: You must drop the ReadGuard before dispatch (if not deadlock)
+        super::serde_support::port_thread_local::set_port(service_object.get_handle().port.clone());
         service_object.dispatch(method, arguments, return_buffer);
+        super::serde_support::port_thread_local::remove_port();
     }
-}
 
-pub fn register(port_id: PortId, mut handle_to_register: Arc<dyn Service>) -> HandleInstance {
-    #[cfg(statistics)]
-    {
-        crate::statistics::CREATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    pub fn register(&self, handle_to_register: Arc<dyn Service>) -> ServiceObjectId {
+        #[cfg(statistics)]
+        {
+            crate::statistics::CREATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        self.service_table.write().create(handle_to_register).get_handle().id
     }
-    let context = context::global::get();
-    let port_table = context.read();
 
-    let err_msg = "The service object you're trying to export is contaminated. It could be an imported handle, not created by you.";
-    assert_eq!(
-        Arc::get_mut(&mut handle_to_register).unwrap().get_handle_mut().port_id_exporter,
-        UNDECIDED_PORT,
-        "{}",
-        err_msg
-    );
-    assert_eq!(
-        Arc::get_mut(&mut handle_to_register).unwrap().get_handle_mut().port_id_importer,
-        UNDECIDED_PORT,
-        "{}",
-        err_msg
-    );
-
-    Arc::get_mut(&mut handle_to_register).unwrap().get_handle_mut().port_id_exporter = port_id;
-    Arc::get_mut(&mut handle_to_register).unwrap().get_handle_mut().port_id_importer =
-        port_table.map.get(&port_id).unwrap().1;
-
-    let port = &port_table.map.get(&port_id).expect("PortTable corrupted").2;
-    port.dispatcher_get().service_table.write().create(handle_to_register).get_handle().careful_clone()
-}
-
-pub fn delete(port_id: PortId, handle: ServiceObjectId) {
-    let context = context::global::get();
-    let port_table = context.read();
-
-    let port = &port_table.map.get(&port_id).expect("PortTable corrupted").2;
-    port.dispatcher_get().service_table.write().remove(handle.index as usize)
+    pub fn delete(&self, id: ServiceObjectId) {
+        self.service_table.write().remove(id.index as usize)
+    }
 }

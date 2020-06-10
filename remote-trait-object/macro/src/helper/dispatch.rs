@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use crate::create_env_path;
 use crate::service::MacroArgs;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 
@@ -21,10 +22,12 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 // then introduce closure list for method dispatch.
 pub fn generate_dispatch(
     MacroArgs {
-        env_path,
+        serde_path,
     }: &MacroArgs,
     the_trait: &syn::ItemTrait,
 ) -> Result<TokenStream2, TokenStream2> {
+    let env_path = create_env_path();
+
     let trait_ident = the_trait.ident.clone();
     let mut if_else_clauses = TokenStream2::new();
 
@@ -110,7 +113,7 @@ pub fn generate_dispatch(
         }
 
         let stmt_deserialize = quote! {
-            let #the_let_pattern: #type_annotation = serde_cbor::from_reader(&arguments[std::mem::size_of::<#env_path::PacketHeader>()..]).unwrap();
+            let #the_let_pattern: #type_annotation = #serde_path::from_reader(&arguments[std::mem::size_of::<#env_path::PacketHeader>()..]).unwrap();
         };
 
         let method_name = method.sig.ident.clone();
@@ -119,7 +122,7 @@ pub fn generate_dispatch(
         };
 
         let the_return = quote! {
-            serde_cbor::to_writer(return_buffer, &result).unwrap();
+            #serde_path::to_writer(return_buffer, &result).unwrap();
         };
 
         if_else_clauses.extend(quote! {
@@ -138,8 +141,9 @@ pub fn generate_dispatch(
     let trait_id_ident = super::id::id_trait_ident(&the_trait);
     let result = quote! {
         impl #env_path::ExportService<dyn #trait_ident> for dyn #trait_ident {
-            fn export(port_id: #env_path::PortId, handle: std::sync::Arc<dyn #trait_ident>) -> #env_path::HandleInstance {
-                #env_path::service_context::register(port_id, intertrait::cast::CastArc::cast::<dyn #env_path::Service>(handle).expect("Trait casting failed"))
+            fn export(port: std::sync::Weak<dyn #env_path::Port>, handle: std::sync::Arc<dyn #trait_ident>) -> #env_path::HandleToExchange {
+                let id = port.upgrade().unwrap().register(intertrait::cast::CastArc::cast::<dyn #env_path::Service>(handle).expect("Trait casting failed"));
+                #env_path::HandleToExchange::from_id(id)
             }
         }
         impl #env_path::DispatchService<dyn #trait_ident> for dyn #trait_ident {

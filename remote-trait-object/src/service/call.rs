@@ -14,50 +14,39 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::context;
 use crate::service::{HandleInstance, MethodId};
 use crate::PacketHeader;
 use std::io::Cursor;
 
-pub fn call<S: serde::Serialize, D: serde::de::DeserializeOwned>(
-    handle: &HandleInstance,
-    method: MethodId,
-    args: &S,
-) -> D {
-    #[cfg(statistics)]
-    {
-        crate::statistics::CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    let mut buffer: Vec<u8> = Vec::new();
-    buffer.resize(std::mem::size_of::<PacketHeader>(), 0 as u8);
-    serde_cbor::to_writer(
+impl HandleInstance {
+    pub fn call<S: serde::Serialize, D: serde::de::DeserializeOwned>(&self, method: MethodId, args: &S) -> D {
+        #[cfg(statistics)]
         {
-            let mut c = Cursor::new(&mut buffer);
-            c.set_position(std::mem::size_of::<PacketHeader>() as u64);
-            c
-        },
-        &args,
-    )
-    .unwrap();
-
-    let context = context::global::get();
-    let port_table = context.read();
-    let port = &port_table.map.get(&handle.port_id_importer).expect("PortTable corrupted").2;
-    let result = port.call(handle.id, method, buffer);
-    serde_cbor::from_reader(&result[std::mem::size_of::<PacketHeader>()..]).unwrap()
-}
-
-pub fn delete(handle: &HandleInstance) {
-    if context::termination::get().load(std::sync::atomic::Ordering::Relaxed) {
-        return
+            crate::statistics::CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        super::serde_support::port_thread_local::set_port(self.port.clone());
+        let mut buffer: Vec<u8> = Vec::new();
+        buffer.resize(std::mem::size_of::<PacketHeader>(), 0 as u8);
+        serde_cbor::to_writer(
+            {
+                let mut c = Cursor::new(&mut buffer);
+                c.set_position(std::mem::size_of::<PacketHeader>() as u64);
+                c
+            },
+            &args,
+        )
+        .unwrap();
+        let result = self.port.upgrade().unwrap().call(self.id, method, buffer);
+        let v = serde_cbor::from_reader(&result[std::mem::size_of::<PacketHeader>()..]).unwrap();
+        super::serde_support::port_thread_local::remove_port();
+        v
     }
-    #[cfg(statistics)]
-    {
-        crate::statistics::DELETE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    pub fn delete(&self) {
+        #[cfg(statistics)]
+        {
+            crate::statistics::DELETE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        self.port.upgrade().unwrap().delete_request(self.id);
     }
-    let context = context::global::get();
-    let port_table = context.read();
-    let port = &port_table.map.get(&handle.port_id_importer).expect("PortTable corrupted").2;
-    port.delete(handle.id);
 }

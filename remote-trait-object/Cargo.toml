@@ -16,7 +16,3 @@ parking_lot = "0.10.2"
 
 [dev-dependencies]
 remote-trait-object-macro = { path = "../remote-trait-object/macro" }
-
-[features]
-default = []
-single_process = []

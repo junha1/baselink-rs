@@ -20,22 +20,17 @@ pub mod id;
 pub mod serde_support;
 pub mod table;
 
-use super::port::PortId;
+use super::Port;
 pub use dispatch::PortDispatcher;
 use serde::{Deserialize, Serialize};
-pub use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 pub type MethodId = u32;
 pub type TraitId = u16;
 pub type InstanceId = u16;
 
-pub const ID_ORDERING: std::sync::atomic::Ordering = std::sync::atomic::Ordering::Relaxed;
-pub type MethodIdAtomic = std::sync::atomic::AtomicU32;
-pub type TraitIdAtomic = std::sync::atomic::AtomicU16;
-
 // We avoid using additional space with Option<>, by these.
 pub const UNDECIDED_INDEX: InstanceId = std::u16::MAX;
-pub const UNDECIDED_PORT: PortId = std::u16::MAX;
 
 /// This struct represents an index to a service object in port server's registry
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Copy)]
@@ -43,45 +38,57 @@ pub struct ServiceObjectId {
     pub(crate) index: InstanceId,
 }
 
-/// This struct is stored in both service object and call stub.
-/// Actually, both use only part of the fields respectively,
-/// though the other fields will be still set same as
-/// the other side's HandleInstance.
-/// For debugging and simplicity, we won't split this for now.
-#[derive(PartialEq, Serialize, Deserialize, Debug)]
 pub struct HandleInstance {
     pub(crate) id: ServiceObjectId,
-    // That of exporter's.
-    pub(crate) port_id_exporter: PortId,
-    // That of importer's.
-    pub(crate) port_id_importer: PortId,
+    // The port this handle belongs to
+    pub(crate) port: Weak<dyn Port>,
 }
 
+#[derive(PartialEq, Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct HandleToExchange(ServiceObjectId);
+
+impl HandleToExchange {
+    pub fn from_id(id: ServiceObjectId) -> Self {
+        Self(id)
+    }
+}
+
+/// Handle created by this must be local-only
 impl Default for HandleInstance {
     fn default() -> Self {
+        let x: Weak<crate::BasicPort> = Weak::new(); // Rust doesn't allow Weak::<dyn Port>::new()
         HandleInstance {
             id: ServiceObjectId {
                 index: UNDECIDED_INDEX,
             },
-            port_id_exporter: UNDECIDED_PORT,
-            port_id_importer: UNDECIDED_PORT,
+            port: x,
         }
     }
 }
 
+impl std::fmt::Debug for HandleInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.id.fmt(f)
+    }
+}
+
 impl HandleInstance {
-    /// This clone is allowed only within this crate
-    pub(crate) fn careful_clone(&self) -> Self {
+    /// You (module implementor) should not call this!
+    pub fn careful_new(port: Weak<dyn Port>, id: HandleToExchange) -> Self {
         HandleInstance {
-            id: self.id,
-            port_id_exporter: self.port_id_exporter,
-            port_id_importer: self.port_id_importer,
+            id: id.0,
+            port,
         }
     }
 
     /// You (module implementor) should not call this!
-    pub fn for_dispatcher_get_port_id(&self) -> PortId {
-        self.port_id_exporter
+    pub fn careful_set(&mut self, port: Weak<dyn Port>) {
+        self.port = port;
+    }
+
+    /// You (module implementor) should not call this!
+    pub fn careful_export(&self) -> HandleToExchange {
+        HandleToExchange(self.id)
     }
 }
 
@@ -115,11 +122,11 @@ impl<T: ?Sized + Service> SArc<T> {
 // These four traits are very special: they are associated with a specific trait.
 // However use (module author) will never use these, but the generated code will.
 pub trait ImportService<T: ?Sized + Service> {
-    fn import(handle: HandleInstance) -> Arc<T>;
+    fn import(port: Weak<dyn Port>, handle: HandleToExchange) -> Arc<T>;
 }
 
 pub trait ExportService<T: ?Sized + Service> {
-    fn export(port_id: PortId, object: Arc<T>) -> HandleInstance;
+    fn export(port: Weak<dyn Port>, object: Arc<T>) -> HandleToExchange;
 }
 
 pub trait DispatchService<T: ?Sized + Service> {
@@ -132,22 +139,22 @@ pub trait IdOfService<T: ?Sized + Service> {
 
 #[macro_export]
 macro_rules! service_export {
-    ($service_trait: path, $port_id: expr, $arg: expr) => {
-        <dyn $service_trait as remote_trait_object::env::ExportService<dyn $service_trait>>::export($port_id, $arg)
-    };
+    ($service_trait: path, $port: expr, $arg: expr) => {{
+        <dyn $service_trait as remote_trait_object::ExportService<dyn $service_trait>>::export($port, $arg)
+    }};
 }
 
 #[macro_export]
 macro_rules! service_import {
-    ($service_trait: path, $arg: expr) => {
-        <dyn $service_trait as remote_trait_object::env::ImportService<dyn $service_trait>>::import($arg)
+    ($service_trait: path, $port: expr, $arg: expr) => {
+        <dyn $service_trait as remote_trait_object::ImportService<dyn $service_trait>>::import($port, $arg)
     };
 }
 
 #[macro_export]
 macro_rules! service_dispatch {
     ($service_trait: path, $object: expr, $method: expr, $arguments: expr, $return_buffer: expr) => {
-        <dyn $service_trait as remote_trait_object::env::DispatchService<dyn $service_trait>>::dispatch(
+        <dyn $service_trait as remote_trait_object::DispatchService<dyn $service_trait>>::dispatch(
             $object,
             $method,
             $arguments,
@@ -159,13 +166,6 @@ macro_rules! service_dispatch {
 #[macro_export]
 macro_rules! service_id {
     ($service_trait: path) => {
-        <dyn $service_trait as remote_trait_object::env::IdOfService<dyn $service_trait>>::id()
+        <dyn $service_trait as remote_trait_object::IdOfService<dyn $service_trait>>::id()
     };
-}
-
-/// These are set of functions that dispatcher / call stubs generated by the macro would call
-pub mod service_context {
-    pub use super::call::call;
-    pub use super::call::delete;
-    pub use super::dispatch::register;
 }

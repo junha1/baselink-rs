@@ -23,10 +23,13 @@ use parking_lot::RwLock;
 use rand::{rngs::StdRng, Rng};
 use remote_trait_object::*;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::thread;
 
+#[derive(Debug)]
 pub struct MyContext {
+    config: Config,
+
     /// total number of relayers
     number: usize,
     /// My index
@@ -36,58 +39,55 @@ pub struct MyContext {
     answers: RwLock<HashMap<String, (Vec<String>, String)>>,
 }
 
-context_provider! {MyContext}
-pub fn get_context() -> &'static MyContext {
-    context_provider_mod::get()
-}
-pub fn set_context(ctx: MyContext) {
-    context_provider_mod::set(ctx)
-}
-pub fn remove_context() {
-    context_provider_mod::remove()
+pub struct MyBootstrap {
+    ctx: Arc<MyContext>,
 }
 
-pub fn initializer() {
-    let config = get_module_config();
-    let (number, index) = serde_cbor::from_slice(&config.args).unwrap();
-    let mut factories = HashMap::new();
-    factories.insert(
-        config.id.clone(),
-        Arc::new(OrdinaryFactory {
-            handle: Default::default(),
-        }) as Arc<dyn RelayerFactory>,
-    );
-    set_context(MyContext {
-        number,
-        index,
-        schedule: Default::default(),
-        factories: RwLock::new(factories),
-        answers: Default::default(),
-    })
-}
-pub struct Preset;
+impl Bootstrap for MyBootstrap {
+    fn new(config: &Config) -> Self {
+        let (number, index) = serde_cbor::from_slice(&config.args).unwrap();
+        let factories = HashMap::new();
 
-impl HandlePreset for Preset {
-    fn export() -> Vec<HandleExchange> {
-        let ctx = get_context();
-        let number = ctx.number;
+        let ctx = Arc::new(MyContext {
+            config: config.clone(),
+            number,
+            index,
+            schedule: Default::default(),
+            factories: RwLock::new(factories),
+            answers: Default::default(),
+        });
+        ctx.factories.write().insert(
+            config.id.clone(),
+            Arc::new(OrdinaryFactory {
+                handle: Default::default(),
+                ctx: ctx.clone(), // FIXME
+            }) as Arc<dyn RelayerFactory>,
+        );
+        MyBootstrap {
+            ctx,
+        }
+    }
+
+    fn export(&mut self, ports: &mut PortTable) -> Vec<HandleExchange> {
+        let number = self.ctx.number;
         let mut exchanges = Vec::<HandleExchange>::new();
 
         for i in 0..number {
             let name = format!("Module{}", i);
-            if name == get_module_config().id {
+            if name == self.ctx.config.id {
                 // myself
                 continue
             }
             let id = service_export!(
                 RelayerFactory,
-                find_port_id(&format!("Module{}", i)).unwrap(),
+                ports.get(&format!("Module{}", i)).unwrap().get_port(),
                 Arc::new(OrdinaryFactory {
                     handle: Default::default(),
+                    ctx: self.ctx.clone()
                 })
             );
             exchanges.push(HandleExchange {
-                exporter: get_module_config().id.clone(),
+                exporter: self.ctx.config.id.clone(),
                 importer: name,
                 handles: vec![id],
                 argument: Vec::new(),
@@ -96,161 +96,143 @@ impl HandlePreset for Preset {
         exchanges
     }
 
-    fn import(mut exchange: HandleExchange) {
-        let ctx = get_context();
-        assert_eq!(exchange.importer, get_module_config().id, "Invalid import request");
+    fn import(&mut self, port: Weak<dyn Port>, mut exchange: HandleExchange) {
+        assert_eq!(exchange.importer, self.ctx.config.id, "Invalid import request");
         if exchange.exporter == "Schedule" {
             assert_eq!(exchange.handles.len(), 1);
-            ctx.schedule.write().replace(service_import!(Schedule, exchange.handles.pop().unwrap()));
+            self.ctx.schedule.write().replace(service_import!(Schedule, port, exchange.handles.pop().unwrap()));
         } else {
-            let mut guard = ctx.factories.write();
+            let mut guard = self.ctx.factories.write();
             assert_eq!(exchange.handles.len(), 1);
-            let h = service_import!(RelayerFactory, exchange.handles.pop().unwrap());
+            let h = service_import!(RelayerFactory, port, exchange.handles.pop().unwrap());
             guard.insert(exchange.exporter, h);
         }
     }
-}
 
-pub fn initiate(_arg: Vec<u8>) -> Vec<u8> {
-    let my_factory = OrdinaryFactory {
-        handle: Default::default(),
-    };
+    fn debug(&self, _arg: &[u8]) -> Vec<u8> {
+        let my_factory = OrdinaryFactory {
+            handle: Default::default(),
+            ctx: self.ctx.clone(),
+        };
 
-    let mut rng: StdRng = rand::SeedableRng::from_entropy();
+        let mut rng: StdRng = rand::SeedableRng::from_entropy();
 
-    let ctx = get_context();
-    let iteration = 32;
-    let parllel: usize = 2;
-    let my_index = ctx.index;
-    let number = ctx.number;
+        let iteration = 32;
+        let parllel: usize = 2;
+        let my_index = self.ctx.index;
+        let number = self.ctx.number;
 
-    for _ in 0..iteration {
-        let mut used_map_list = HashMap::new();
-        let mut paths = HashMap::new();
-        for i in 0..parllel {
-            let mut used_map = new_avail_map(ctx.number, 0);
-            let avail = ctx.schedule.read().as_ref().unwrap().get();
-            // RelayerFactory::ask_path will require one thread always
-            let mut at_least_1_for_all = true;
-            for j in 0..number {
-                if j == my_index {
-                    continue
-                }
-                if avail[my_index][j] < 1 {
-                    at_least_1_for_all = false;
-                    break
-                }
-            }
-            if !at_least_1_for_all {
-                ctx.schedule.read().as_ref().unwrap().set(avail);
-                continue
-            }
-            let mut avail = avail;
-            for j in 0..number {
-                if j == my_index {
-                    continue
-                }
-                avail[my_index][j] -= 1;
-                used_map[my_index][j] += 1;
-            }
-
-            // path generation
-            let mut path = Vec::new();
-            let mut last = my_index;
-            for _ in 0..30 {
-                let mut suc = false;
-                for _ in 0..5 {
-                    let next = rng.gen_range(0, number);
-                    // no consumption of thread here (See how we set the factory handle for itself)
-                    if next == last {
-                        path.push(format!("Module{}", next));
-                        suc = true;
-                        break
-                    } else if avail[next][last] > 0 {
-                        path.push(format!("Module{}", next));
-                        avail[next][last] -= 1;
-                        used_map[next][last] += 1;
-                        last = next;
-                        suc = true;
+        for _ in 0..iteration {
+            let mut used_map_list = HashMap::new();
+            let mut paths = HashMap::new();
+            for i in 0..parllel {
+                let mut used_map = new_avail_map(self.ctx.number, 0);
+                let avail = self.ctx.schedule.read().as_ref().unwrap().get();
+                // RelayerFactory::ask_path will require one thread always
+                let mut at_least_1_for_all = true;
+                for j in 0..number {
+                    if j == my_index {
+                        continue
+                    }
+                    if avail[my_index][j] < 1 {
+                        at_least_1_for_all = false;
                         break
                     }
                 }
-                if !suc {
-                    break
+                if !at_least_1_for_all {
+                    self.ctx.schedule.read().as_ref().unwrap().set(avail);
+                    continue
                 }
+                let mut avail = avail;
+                for j in 0..number {
+                    if j == my_index {
+                        continue
+                    }
+                    avail[my_index][j] -= 1;
+                    used_map[my_index][j] += 1;
+                }
+
+                // path generation
+                let mut path = Vec::new();
+                let mut last = my_index;
+                for _ in 0..30 {
+                    let mut suc = false;
+                    for _ in 0..5 {
+                        let next = rng.gen_range(0, number);
+                        // no consumption of thread here (See how we set the factory handle for itself)
+                        if next == last {
+                            path.push(format!("Module{}", next));
+                            suc = true;
+                            break
+                        } else if avail[next][last] > 0 {
+                            path.push(format!("Module{}", next));
+                            avail[next][last] -= 1;
+                            used_map[next][last] += 1;
+                            last = next;
+                            suc = true;
+                            break
+                        }
+                    }
+                    if !suc {
+                        break
+                    }
+                }
+                path.insert(0, self.ctx.config.id.clone());
+                let key = format!("Key{}", i);
+                paths.insert(key.clone(), path);
+                used_map_list.insert(key.clone(), used_map);
+
+                self.ctx.schedule.read().as_ref().unwrap().set(avail);
             }
-            path.insert(0, get_module_config().id.clone());
-            let key = format!("Key{}", i);
-            paths.insert(key.clone(), path);
-            used_map_list.insert(key.clone(), used_map);
 
-            ctx.schedule.read().as_ref().unwrap().set(avail);
-        }
-
-        {
-            let mut guard_answers = get_context().answers.write();
-            guard_answers.clear();
-            for (key, path) in paths.drain() {
-                guard_answers.insert(key, (path, format!("{}", rng.gen_range(0, 10000))));
-            }
-        }
-
-        let guard_answers = get_context().answers.read();
-        let guard_factory = get_context().factories.read();
-        let mut runners = Vec::new();
-        for (key, (path, answer)) in &*guard_answers {
-            if path.len() < 2 {
-                continue
-            }
-            if let Answer::Next(next) = my_factory.ask_path(key.clone(), 0) {
-                let machine =
-                    guard_factory.get(&next).unwrap().create(key.clone(), 0, get_module_config().id.clone()).unwrap();
-
-                // Important: if you spawn a thread, you must set an instance key explicitly.
-                let instance_key = get_key();
-                runners.push((
-                    key.clone(),
-                    thread::spawn(move || {
-                        set_key(instance_key);
-                        machine.run()
-                    }),
-                    answer.clone(),
-                ));
-            } else {
-                panic!("Test illformed")
-            }
-        }
-
-        while let Some((key, guess, answer)) = runners.pop() {
-            assert_eq!(guess.join().unwrap(), answer);
-            let mut avail = ctx.schedule.read().as_ref().unwrap().get();
-
-            for (avail_sub_list, used_sub_list) in avail.iter_mut().zip(used_map_list.remove(&key).unwrap().into_iter())
             {
-                for (avail_entry, used_entry) in avail_sub_list.iter_mut().zip(used_sub_list.iter()) {
-                    *avail_entry += *used_entry;
+                let mut guard_answers = self.ctx.answers.write();
+                guard_answers.clear();
+                for (key, path) in paths.drain() {
+                    guard_answers.insert(key, (path, format!("{}", rng.gen_range(0, 10000))));
                 }
             }
-            ctx.schedule.read().as_ref().unwrap().set(avail.clone());
+
+            let guard_answers = self.ctx.answers.read();
+            let guard_factory = self.ctx.factories.read();
+            let mut runners = Vec::new();
+            for (key, (path, answer)) in &*guard_answers {
+                if path.len() < 2 {
+                    continue
+                }
+                if let Answer::Next(next) = my_factory.ask_path(key.clone(), 0) {
+                    let machine =
+                        guard_factory.get(&next).unwrap().create(key.clone(), 0, self.ctx.config.id.clone()).unwrap();
+                    runners.push((key.clone(), thread::spawn(move || machine.run()), answer.clone()));
+                } else {
+                    panic!("Test illformed")
+                }
+            }
+
+            while let Some((key, guess, answer)) = runners.pop() {
+                assert_eq!(guess.join().unwrap(), answer);
+                let mut avail = self.ctx.schedule.read().as_ref().unwrap().get();
+
+                for (avail_sub_list, used_sub_list) in
+                    avail.iter_mut().zip(used_map_list.remove(&key).unwrap().into_iter())
+                {
+                    for (avail_entry, used_entry) in avail_sub_list.iter_mut().zip(used_sub_list.iter()) {
+                        *avail_entry += *used_entry;
+                    }
+                }
+                self.ctx.schedule.read().as_ref().unwrap().set(avail.clone());
+            }
         }
+        Vec::new()
     }
-    Vec::new()
 }
 
-#[cfg(feature = "single_process")]
+#[cfg(not(feature = "process"))]
 pub fn main_like(args: Vec<String>) {
-    run_control_loop::<cbsb::ipc::intra::Intra, Preset>(args, Box::new(initializer), Some(Box::new(initiate)));
-    remove_context();
-    remote_trait_object::global::remove();
+    run_control_loop::<cbsb::ipc::intra::Intra, MyBootstrap>(args);
 }
 
-#[cfg(not(feature = "single_process"))]
+#[cfg(feature = "process")]
 pub fn main_like(args: Vec<String>) {
-    run_control_loop::<crate::module_library::DefaultIpc, Preset>(
-        args,
-        Box::new(initializer),
-        Some(Box::new(initiate)),
-    );
-    remove_context();
-    remote_trait_object::global::remove();
+    run_control_loop::<crate::module_library::DefaultIpc, MyBootstrap>(args);
 }

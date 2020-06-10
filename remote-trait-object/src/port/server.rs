@@ -15,38 +15,13 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::PacketHeader;
-use super::PortId;
 use super::{DELETE_INDICATOR, SLOT_CALL_OR_RETURN_INDICATOR};
-use crate::context::single_process_support;
 use crate::queue::Queue;
-use crate::service::{dispatch::delete, PortDispatcher, UNDECIDED_PORT};
+use crate::Port;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::thread;
-
-/// This manages thread-local keys for port, which will be used in serialization of
-/// SArc. Note that this is required even in the inter-process setup.
-/// TODO: check that serde doens't spawn a thread while serializing.
-pub mod port_thread_local {
-    use super::*;
-    use std::cell::Cell;
-    thread_local!(static INSTANCE_KEY: Cell<crate::port::PortId> = Cell::new(UNDECIDED_PORT));
-
-    pub fn set_key(key: crate::port::PortId) {
-        INSTANCE_KEY.with(|k| {
-            assert_eq!(k.get(), UNDECIDED_PORT);
-            k.set(key);
-        })
-    }
-
-    pub fn get_key() -> crate::port::PortId {
-        INSTANCE_KEY.with(|k| {
-            assert_ne!(k.get(), UNDECIDED_PORT);
-            k.get()
-        })
-    }
-}
 
 #[cfg(debug_assertions)]
 const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1_000_000);
@@ -56,17 +31,11 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(50);
 fn service_handler(
     invoke: Receiver<Vec<u8>>,
     response: Sender<Vec<u8>>,
-    dispatcher: Arc<PortDispatcher>,
-    instance_key: single_process_support::InstanceKey,
-    port_id: PortId,
+    port: Arc<dyn Port>,
     token: u32,
     token_queue: Arc<Queue<u32>>,
 ) -> Result<(), ()> {
-    // This setup makes a thread local unique key for each instance of module
-    // so that the service can retrieve its own global context.
-    single_process_support::set_key(instance_key);
     // This is for service object serialization
-    port_thread_local::set_key(port_id);
     loop {
         let data = invoke.recv().map_err(|_| ())?;
         if data.len() < std::mem::size_of::<PacketHeader>() {
@@ -77,9 +46,9 @@ fn service_handler(
         let mut buffer: Vec<u8> = vec![0; std::mem::size_of::<PacketHeader>()];
 
         if header.method == DELETE_INDICATOR {
-            delete(dispatcher.get_id(), header.handle);
+            port.delete(header.handle);
         } else {
-            dispatcher.dispatch(header.handle, header.method, &data, {
+            port.dispatch(header.handle, header.method, &data, {
                 let mut c = Cursor::new(&mut buffer);
                 c.set_position(std::mem::size_of::<PacketHeader>() as u64);
                 c
@@ -94,9 +63,7 @@ fn service_handler(
 fn receiver(
     ipc_send: Sender<Vec<u8>>,
     ipc_recv: Receiver<Vec<u8>>,
-    dispatcher: Arc<PortDispatcher>,
-    instance_key: single_process_support::InstanceKey,
-    port_id: PortId,
+    port: Arc<dyn Port>,
     max_threads: usize,
     channel_capcity: usize,
 ) {
@@ -109,11 +76,11 @@ fn receiver(
     for i in 0..max_threads {
         let (send, recv) = bounded(channel_capcity);
         invocation_send.push(send);
-        let dispatcher_ = dispatcher.clone();
+        let port_ = port.clone();
         let ipc_send_ = ipc_send.clone();
         let token_queue_ = token_queue.clone();
         service_handlers.push(thread::spawn(move || {
-            service_handler(recv, ipc_send_, dispatcher_, instance_key, port_id, i as u32, token_queue_).ok();
+            service_handler(recv, ipc_send_, port_, i as u32, token_queue_).ok();
         }));
         token_queue.push(i as u32);
     }
@@ -136,17 +103,15 @@ pub struct Server {
 
 impl Server {
     pub fn new(
-        dispatcher: Arc<PortDispatcher>,
         ipc_send: Sender<Vec<u8>>,
         ipc_recv: Receiver<Vec<u8>>,
-        instance_key: single_process_support::InstanceKey,
-        port_id: PortId,
+        port: Arc<dyn Port>,
         max_threads: usize,
         channel_capcity: usize,
     ) -> Self {
         Server {
             receiver_thread: Some(thread::spawn(move || {
-                receiver(ipc_send, ipc_recv, dispatcher, instance_key, port_id, max_threads, channel_capcity)
+                receiver(ipc_send, ipc_recv, port, max_threads, channel_capcity)
             })),
         }
     }
