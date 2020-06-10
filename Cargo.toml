@@ -1,4 +1,7 @@
 [workspace]
 members = [
     "basesandbox",
+    "remote-trait-object",
+    "remote-trait-object-tests",
+    "module-rt",
 ]
