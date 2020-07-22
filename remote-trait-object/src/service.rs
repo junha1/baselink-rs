@@ -21,7 +21,7 @@ pub mod remote;
 pub mod serde_support;
 
 use crate::forwarder::ServiceObjectId;
-use crate::port::Port;
+use crate::port::{Port, RemoteObjectId};
 use serde::{Deserialize, Serialize};
 use std::sync::Weak;
 
@@ -37,14 +37,16 @@ pub struct HandleToExchange(pub(crate) ServiceObjectId);
 /// Remote service will carry this.
 #[derive(Debug)]
 pub struct Handle {
-    pub id: ServiceObjectId,
-    pub port: Weak<dyn Port>,
+    service_id: ServiceObjectId,
+    remote_id: RemoteObjectId,
+    port: Weak<dyn Port>,
 }
 
 impl Handle {
-    pub fn new(imported_id: HandleToExchange, port: Weak<dyn Port>) -> Self {
+    pub fn new(handle: HandleToExchange, port: Weak<dyn Port>) -> Self {
         Handle {
-            id: imported_id.0,
+            service_id: handle.0,
+            remote_id: port.upgrade().unwrap().register_remote(handle),
             port,
         }
     }

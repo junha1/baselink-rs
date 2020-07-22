@@ -29,7 +29,7 @@ impl Handle {
     ) -> D {
         super::serde_support::port_thread_local::set_port(self.port.clone());
         let args = F::to_vec(args).unwrap();
-        let packet = Packet::new_request(self.id, method, &args);
+        let packet = Packet::new_request(self.service_id, method, &args);
         let response = self.port.upgrade().unwrap().call(packet.view());
         let result = F::from_slice(response.data()).unwrap();
         super::serde_support::port_thread_local::remove_port();
@@ -40,9 +40,8 @@ impl Handle {
 impl Drop for Handle {
     /// Dropping handle will be signaled to the exporter, so that it can remove the service object as well.
     fn drop(&mut self) {
-        self.port
-            .upgrade()
-            .expect("You must drop the remote service before the RTO context is dropped")
-            .delete_request(self.id);
+        let port = self.port.upgrade().expect("You must drop the remote service before the RTO context is dropped");
+        port.delete_request(self.service_id);
+        port.delete_registered_remote(self.remote_id)
     }
 }

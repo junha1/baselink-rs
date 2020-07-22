@@ -74,11 +74,11 @@ impl Port for BasicPort {
         HandleToExchange(self.registry.register_service_object(service_object))
     }
 
-    fn register_remote(&self, handle: HandleToExchange) -> RemoteObjectId {
+    fn register_remote(&self, _handle: HandleToExchange) -> RemoteObjectId {
         0
     }
 
-    fn delete_registered_remote(&self, id: RemoteObjectId) {}
+    fn delete_registered_remote(&self, _id: RemoteObjectId) {}
 }
 
 impl BasicPort {
