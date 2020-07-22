@@ -99,6 +99,12 @@ impl Port for TestPort {
     fn register_service(&self, service_object: Arc<dyn Dispatch>) -> HandleToExchange {
         HandleToExchange(self.dispatch_map.lock().insert(service_object))
     }
+
+    fn register_remote(&self, _handle: HandleToExchange) -> RemoteObjectId {
+        0
+    }
+
+    fn delete_registered_remote(&self, _id: RemoteObjectId) {}
 }
 
 #[rto_macro::service]

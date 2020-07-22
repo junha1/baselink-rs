@@ -30,10 +30,14 @@ use std::sync::{
     Arc, Weak,
 };
 
+pub type RemoteObjectId = u32;
+
 pub trait Port: std::fmt::Debug + Send + Sync + 'static {
     fn call(&self, packet: PacketView) -> Packet;
     fn delete_request(&self, id: ServiceObjectId);
     fn register_service(&self, service_object: Arc<dyn Dispatch>) -> HandleToExchange;
+    fn register_remote(&self, handle: HandleToExchange) -> RemoteObjectId;
+    fn delete_registered_remote(&self, id: RemoteObjectId);
 }
 
 /// Weak::new() is not implemented for ?Sized.
@@ -69,6 +73,12 @@ impl Port for BasicPort {
     fn register_service(&self, service_object: Arc<dyn Dispatch>) -> HandleToExchange {
         HandleToExchange(self.registry.register_service_object(service_object))
     }
+
+    fn register_remote(&self, handle: HandleToExchange) -> RemoteObjectId {
+        0
+    }
+
+    fn delete_registered_remote(&self, id: RemoteObjectId) {}
 }
 
 impl BasicPort {

@@ -169,7 +169,7 @@ mod tests {
         use super::super::ServiceRef;
         use crate::macro_env::*;
         use crate::packet::*;
-        use crate::port::Port;
+        use crate::port::{Port, RemoteObjectId};
         use crate::service::ServiceObjectId;
         use crate::*;
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -193,6 +193,12 @@ mod tests {
             fn delete_request(&self, _id: ServiceObjectId) {
                 unimplemented!()
             }
+
+            fn register_remote(&self, _handle: HandleToExchange) -> RemoteObjectId {
+                0
+            }
+
+            fn delete_registered_remote(&self, _id: RemoteObjectId) {}
         }
 
         trait Foo: Service {}
