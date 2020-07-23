@@ -61,7 +61,7 @@ impl TransportRecv for IntraRecv {
                 Ok(data) => data,
                 Err(_) => {
                     debug!("Counterparty connection is closed in Intra");
-                    return Err(RecvError::Termination)
+                    return Err(RecvError::Closed)
                 }
             },
             i if i == terminator_index => {
@@ -114,4 +114,19 @@ pub fn create() -> TransportEnds {
         recv2,
         send2,
     }
+}
+
+#[test]
+fn receive_remaning_packets() {
+    let TransportEnds{send1, recv1, send2, recv2} = create();
+
+    send1.send(&[1]);
+    send1.send(&[1]);
+    send1.send(&[1]);
+
+    drop(send1);
+
+    recv2.recv(None).unwrap();
+    recv2.recv(None).unwrap();
+    recv2.recv(None).unwrap();
 }

@@ -32,8 +32,8 @@ pub trait Forward {
 }
 
 pub struct MultiplexResult {
-    pub request_recv: Receiver<Packet>,
-    pub response_recv: Receiver<Packet>,
+    pub request_recv: Receiver<Result<Packet, RecvError>>,
+    pub response_recv: Receiver<Result<Packet, RecvError>>,
     pub multiplexed_send: Sender<Packet>,
     pub multiplexer: Multiplexer,
 }
@@ -98,14 +98,15 @@ impl Multiplexer {
 
 fn receiver_loop<Forwarder: Forward, Receiver: TransportRecv>(
     transport_recv: Receiver,
-    request_send: Sender<Packet>,
-    response_send: Sender<Packet>,
+    request_send: Sender<Result<Packet, RecvError>>,
+    response_send: Sender<Result<Packet, RecvError>>,
 ) {
     loop {
         let message = match transport_recv.recv(None) {
             Err(RecvError::TimeOut) => panic!(),
-            Err(RecvError::Termination) => {
-                debug!("transport_recv is closed in multiplex");
+            Err(e) => {
+                debug!("transport_recv is closed in multiplex1");
+                request_send.send(Err(e));
                 return
             }
             Ok(data) => data,
@@ -117,9 +118,9 @@ fn receiver_loop<Forwarder: Forward, Receiver: TransportRecv>(
         let packet = Packet::new_from_buffer(message);
 
         match forward_result {
-            ForwardResult::Request => request_send.send(packet).unwrap(),
+            ForwardResult::Request => request_send.send(Ok(packet)).unwrap(),
 
-            ForwardResult::Response => response_send.send(packet).unwrap(),
+            ForwardResult::Response => response_send.send(Ok(packet)).unwrap(),
         }
     }
 }

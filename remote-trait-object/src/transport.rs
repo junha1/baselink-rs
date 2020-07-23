@@ -16,15 +16,19 @@
 
 pub(crate) mod multiplex;
 
+#[derive(Debug, PartialEq)]
+pub enum SendError {}
+
 pub trait TransportSend: Send {
     /// It might block until counterparty's recv(). Even if not, the order is still guaranteed.
-    fn send(&self, data: &[u8]);
+    fn send(&self, data: &[u8]) -> Result<(), SendError>;
 }
 
 #[derive(Debug, PartialEq)]
 pub enum RecvError {
     TimeOut,
     Termination,
+    Closed,
 }
 
 pub trait Terminate: Send {
@@ -35,8 +39,9 @@ pub trait Terminate: Send {
 pub trait TransportRecv: Send {
     /// Returns Err only for the timeout or termination wake-up(otherwise panic).
     ///
-    /// Note that it is not guaranteed to receive remaining data after the counter end has
-    /// been closed earlier. You should assume that you will receive Err(Termination) in such case.
+    /// Note that it must be guaranteed to receive remaining data after the counter end has
+    /// been closed earlier.
+    /// If there is no remaning packet, then it must return `Closed`.
     fn recv(&self, timeout: Option<std::time::Duration>) -> Result<Vec<u8>, RecvError>;
 
     /// Create a terminate switch that can be sent to another thread
