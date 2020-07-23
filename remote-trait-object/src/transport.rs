@@ -17,9 +17,11 @@
 pub(crate) mod multiplex;
 
 #[derive(Debug, PartialEq)]
-pub enum SendError {}
+pub enum SendError {
+    Closed,
+}
 
-pub trait TransportSend: Send {
+pub trait TransportSend: Send + std::fmt::Debug {
     /// It might block until counterparty's recv(). Even if not, the order is still guaranteed.
     fn send(&self, data: &[u8]) -> Result<(), SendError>;
 }

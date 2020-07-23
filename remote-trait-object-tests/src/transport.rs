@@ -17,11 +17,12 @@
 use crossbeam::channel::{bounded, Receiver, Select, SelectTimeoutError, Sender};
 use remote_trait_object::transport::*;
 
+#[derive(Debug)]
 pub struct IntraSend(Sender<Vec<u8>>);
 
 impl TransportSend for IntraSend {
-    fn send(&self, data: &[u8]) {
-        self.0.send(data.to_vec()).unwrap();
+    fn send(&self, data: &[u8]) -> Result<(), SendError> {
+        self.0.send(data.to_vec()).map_err(|_| SendError::Closed)
     }
 }
 
@@ -114,19 +115,4 @@ pub fn create() -> TransportEnds {
         recv2,
         send2,
     }
-}
-
-#[test]
-fn receive_remaning_packets() {
-    let TransportEnds{send1, recv1, send2, recv2} = create();
-
-    send1.send(&[1]);
-    send1.send(&[1]);
-    send1.send(&[1]);
-
-    drop(send1);
-
-    recv2.recv(None).unwrap();
-    recv2.recv(None).unwrap();
-    recv2.recv(None).unwrap();
 }

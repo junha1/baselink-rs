@@ -16,7 +16,6 @@
 
 use super::store::run_store;
 use super::types::*;
-use crossbeam::channel::bounded;
 use remote_trait_object::*;
 
 struct MyCreditCard {
@@ -44,10 +43,8 @@ fn test_runner(f: impl Fn(Box<dyn Store>)) {
         recv2,
         send2,
     } = crate::transport::create();
-    let store_runner = std::thread::Builder::new()
-        .name("Store Runner".to_owned())
-        .spawn(move || run_store((send2, recv2)))
-        .unwrap();
+    let store_runner =
+        std::thread::Builder::new().name("Store Runner".to_owned()).spawn(move || run_store((send2, recv2))).unwrap();
 
     let (rto_context, store): (Context, ServiceRef<dyn Store>) = Context::with_initial_service(
         Config::default_setup(),
@@ -198,7 +195,7 @@ mod tests {
         assert_eq!(store.order_pizza(Pizza::Pepperoni, &&&&&&&&&&&&&&13), "Here's a delicious pepperoni pizza");
 
         drop(store);
-        rto_context.firm_close(None);
+        rto_context.firm_close(None).unwrap();
 
         store_runner.join().unwrap();
     }

@@ -16,7 +16,6 @@
 
 use super::types::*;
 use crate::transport::{IntraRecv, IntraSend};
-use crossbeam::channel::Receiver;
 use remote_trait_object::*;
 
 struct MyPizzaStore {

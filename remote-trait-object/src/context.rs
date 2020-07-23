@@ -19,6 +19,7 @@ use crate::port::{client::Client, server::Server, BasicPort, Port};
 use crate::transport::multiplex::{self, ForwardResult, MultiplexResult, Multiplexer};
 use crate::transport::{TransportRecv, TransportSend};
 use crate::{raw_exchange::*, Service, ServiceRef};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Barrier, Weak};
 
@@ -80,7 +81,7 @@ pub struct Context {
     port: Option<Arc<BasicPort>>,
     meta_service: Option<Box<dyn MetaService>>,
     firm_close_barrier: Arc<Barrier>,
-    config: Config
+    config: Config,
 }
 
 impl std::fmt::Debug for Context {
@@ -97,18 +98,20 @@ impl Context {
     ) -> Self {
         let firm_close_barrier = Arc::new(Barrier::new(2));
 
+        let request_send = Arc::new(Mutex::new(transport_send));
+        let response_send = Arc::clone(&request_send);
+
         let MultiplexResult {
             multiplexer,
             request_recv,
             response_recv,
-            multiplexed_send,
-        } = Multiplexer::multiplex::<R, S, PacketForward>(config.clone(), transport_send, transport_recv);
-        let client = Client::new(config.clone(), multiplexed_send.clone(), response_recv);
+        } = Multiplexer::multiplex::<R, PacketForward>(config.clone(), transport_recv);
+        let client = Client::new(config.clone(), request_send, response_recv);
         let port = BasicPort::new(
             client,
             (Box::new(MetaServiceImpl::new(Arc::clone(&firm_close_barrier))) as Box<dyn MetaService>).into_skeleton(),
         );
-        let server = Server::new(config.clone(), port.get_registry(), multiplexed_send, request_recv);
+        let server = Server::new(config.clone(), port.get_registry(), response_send, request_recv);
 
         let port_weak = Arc::downgrade(&port);
         let meta_service = <Box<dyn MetaService> as ImportRemote<dyn MetaService>>::import_remote(
@@ -122,7 +125,7 @@ impl Context {
             port: Some(port),
             meta_service: Some(meta_service),
             firm_close_barrier,
-            config
+            config,
         }
     }
 
@@ -139,19 +142,21 @@ impl Context {
     ) -> (Self, ServiceRef<B>) {
         let firm_close_barrier = Arc::new(Barrier::new(2));
 
+        let request_send = Arc::new(Mutex::new(transport_send));
+        let response_send = Arc::clone(&request_send);
+
         let MultiplexResult {
             multiplexer,
             request_recv,
             response_recv,
-            multiplexed_send,
-        } = Multiplexer::multiplex::<R, S, PacketForward>(config.clone(), transport_send, transport_recv);
-        let client = Client::new(config.clone(), multiplexed_send.clone(), response_recv);
+        } = Multiplexer::multiplex::<R, PacketForward>(config.clone(), transport_recv);
+        let client = Client::new(config.clone(), request_send, response_recv);
         let port = BasicPort::with_initial_service(
             client,
             (Box::new(MetaServiceImpl::new(Arc::clone(&firm_close_barrier))) as Box<dyn MetaService>).into_skeleton(),
             initial_service.get_raw_export(),
         );
-        let server = Server::new(config.clone(), port.get_registry(), multiplexed_send, request_recv);
+        let server = Server::new(config.clone(), port.get_registry(), response_send, request_recv);
 
         let port_weak = Arc::downgrade(&port) as Weak<dyn Port>;
         let meta_service = <Box<dyn MetaService> as ImportRemote<dyn MetaService>>::import_remote(
@@ -166,7 +171,7 @@ impl Context {
             port: Some(port),
             meta_service: Some(meta_service),
             firm_close_barrier,
-            config
+            config,
         };
         let initial_service = ServiceRef::from_raw_import(initial_handle, port_weak);
         (ctx, initial_service)

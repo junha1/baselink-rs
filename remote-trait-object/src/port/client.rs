@@ -16,9 +16,11 @@
 
 use crate::packet::{Packet, PacketView, SlotId};
 use crate::queue::Queue;
+use crate::transport::{RecvError, TransportRecv, TransportSend};
 use crate::Config;
 use crossbeam::channel::RecvTimeoutError::{Disconnected, Timeout};
-use crossbeam::channel::{bounded, Receiver, RecvError, Sender};
+use crossbeam::channel::{self, bounded, Receiver, Sender};
+use parking_lot::Mutex;
 use std::sync::Arc;
 use std::thread;
 use std::time;
@@ -34,13 +36,17 @@ struct CallSlot {
 pub struct Client {
     config: Config,
     call_slots: Arc<Queue<CallSlot>>,
-    transport_send: Sender<Packet>,
+    transport_send: Arc<Mutex<dyn TransportSend>>,
     receiver_thread: Option<thread::JoinHandle<()>>,
     joined_event_receiver: Receiver<()>,
 }
 
 impl Client {
-    pub fn new(config: Config, transport_send: Sender<Packet>, transport_recv: Receiver<Packet>) -> Self {
+    pub fn new<R: TransportRecv + 'static>(
+        config: Config,
+        transport_send: Arc<Mutex<dyn TransportSend>>,
+        transport_recv: R,
+    ) -> Self {
         let (joined_event_sender, joined_event_receiver) = bounded(1);
         let callslot_size = SlotId::new(config.call_slots as u32);
         let call_slots = Arc::new(Queue::new(callslot_size.as_usize()));
@@ -67,7 +73,7 @@ impl Client {
                 thread::Builder::new()
                     .name(format!("[{}] client", name))
                     .spawn(move || {
-                        if let Err(RecvError) = receive_loop(transport_recv, to_slot_receivers) {
+                        if let Err(_) = receive_loop(transport_recv, to_slot_receivers) {
                             // Multiplexer is closed
                         }
                         joined_event_sender.send(()).unwrap();
@@ -87,7 +93,10 @@ impl Client {
             packet
         };
 
-        self.transport_send.send(packet).expect("port::Client::call is called after mulitplexer is dropped");
+        self.transport_send
+            .lock()
+            .send(packet.buffer())
+            .expect("port::Client::call is called after mulitplexer is dropped");
         let response_packet = slot.response.recv().expect(
             "counterparty send is managed by client. \n\
         This error might be due to drop after disconnection of the two remote-trait-object contexts. \n\
@@ -120,9 +129,10 @@ impl Drop for Client {
     }
 }
 
-fn receive_loop(transport_recv: Receiver<Packet>, to_slot_receivers: Vec<Sender<Packet>>) -> Result<(), RecvError> {
+fn receive_loop(transport_recv: impl TransportRecv, to_slot_receivers: Vec<Sender<Packet>>) -> Result<(), RecvError> {
     loop {
-        let packet = transport_recv.recv()?;
+        // FIXME: use timeout from configuration
+        let packet = Packet::new_from_buffer(transport_recv.recv(None)?);
         let slot_id = packet.view().slot();
         to_slot_receivers[slot_id.as_usize()]
             .send(packet)
