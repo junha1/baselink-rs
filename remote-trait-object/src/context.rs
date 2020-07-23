@@ -80,6 +80,13 @@ pub struct Context {
     port: Option<Arc<BasicPort>>,
     meta_service: Option<Box<dyn MetaService>>,
     firm_close_barrier: Arc<Barrier>,
+    config: Config
+}
+
+impl std::fmt::Debug for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Context").field("config", &self.config).finish()
+    }
 }
 
 impl Context {
@@ -101,7 +108,7 @@ impl Context {
             client,
             (Box::new(MetaServiceImpl::new(Arc::clone(&firm_close_barrier))) as Box<dyn MetaService>).into_skeleton(),
         );
-        let server = Server::new(config, port.get_registry(), multiplexed_send, request_recv);
+        let server = Server::new(config.clone(), port.get_registry(), multiplexed_send, request_recv);
 
         let port_weak = Arc::downgrade(&port);
         let meta_service = <Box<dyn MetaService> as ImportRemote<dyn MetaService>>::import_remote(
@@ -115,6 +122,7 @@ impl Context {
             port: Some(port),
             meta_service: Some(meta_service),
             firm_close_barrier,
+            config
         }
     }
 
@@ -143,7 +151,7 @@ impl Context {
             (Box::new(MetaServiceImpl::new(Arc::clone(&firm_close_barrier))) as Box<dyn MetaService>).into_skeleton(),
             initial_service.get_raw_export(),
         );
-        let server = Server::new(config, port.get_registry(), multiplexed_send, request_recv);
+        let server = Server::new(config.clone(), port.get_registry(), multiplexed_send, request_recv);
 
         let port_weak = Arc::downgrade(&port) as Weak<dyn Port>;
         let meta_service = <Box<dyn MetaService> as ImportRemote<dyn MetaService>>::import_remote(
@@ -158,6 +166,7 @@ impl Context {
             port: Some(port),
             meta_service: Some(meta_service),
             firm_close_barrier,
+            config
         };
         let initial_service = ServiceRef::from_raw_import(initial_handle, port_weak);
         (ctx, initial_service)
@@ -181,13 +190,12 @@ impl Context {
 
     /// TODO: write a good explanation
     /// FIXME: use timeout
-    pub fn firm_close(mut self, _timeout: Option<std::time::Duration>) -> Result<(), Self> {
+    pub fn firm_close(self, _timeout: Option<std::time::Duration>) -> Result<(), Self> {
         let barrier = Arc::clone(&self.firm_close_barrier);
-        let meta_service = self.meta_service.take().unwrap();
         let t = std::thread::spawn(move || {
             barrier.wait();
         });
-        meta_service.firm_close();
+        self.meta_service.as_ref().unwrap().firm_close();
         t.join().unwrap();
 
         Ok(())
