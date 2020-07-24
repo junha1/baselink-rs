@@ -30,6 +30,7 @@ pub trait TransportSend: Sync + Send + std::fmt::Debug {
 pub enum RecvError {
     TimeOut,
     Termination,
+    Closed,
 }
 
 pub trait Terminate: Send {
