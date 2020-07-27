@@ -35,8 +35,32 @@ enum ExportOrImport {
     Import(HandleToExchange, Weak<dyn Port>),
 }
 
+struct Consumed {
+    consumed: RefCell<bool>,
+}
+
+impl Consumed {
+    fn new() -> Self {
+        Consumed {
+            consumed: RefCell::new(false),
+        }
+    }
+
+    fn consume(&self) {
+        assert!(!*self.consumed.borrow());
+        *self.consumed.borrow_mut() = true;
+    }
+}
+
+impl Drop for Consumed {
+    fn drop(&mut self) {
+        assert!(*self.consumed.borrow(), "You must consume the ServiceRef you created in an appropriate usage")
+    }
+}
+
 pub struct ServiceRef<T: ?Sized + Service> {
     service: ExportOrImport,
+    consumed: Consumed,
     _marker: PhantomData<T>,
 }
 
@@ -44,33 +68,52 @@ impl<T: ?Sized + Service> ServiceRef<T> {
     pub fn from_service(service: impl IntoSkeleton<T>) -> Self {
         Self {
             service: ExportOrImport::Export(RefCell::new(ExportEntry::ReadyToExport(service.into_skeleton()))),
+            consumed: Consumed::new(),
             _marker: PhantomData,
         }
     }
 
     pub fn into_remote<P: ImportRemote<T>>(self) -> P {
+        self.consumed.consume();
         match self.service {
             ExportOrImport::Import(handle, port) => P::import_remote(port, handle),
             _ => panic!("You must call import() on an imported ServiceRef"),
         }
     }
 
+    pub fn return_back(self) {
+        self.consumed.consume();
+        match self.service {
+            ExportOrImport::Import(handle, port) => {
+                let _ = Box::<dyn NullService>::import_remote(port, handle);
+            }
+            _ => panic!("You must call return_back() on an imported ServiceRef"),
+        }
+    }
+
     pub fn cast_service<U: ?Sized + Service>(self) -> Result<ServiceRef<U>, ()> {
         // TODO: Check the compatibility between traits using IDL
+        debug_assert!(!*self.consumed.consumed.borrow());
+        self.consumed.consume();
         Ok(ServiceRef {
             service: self.service,
+            consumed: Consumed::new(),
             _marker: PhantomData,
         })
     }
 
     pub fn cast_service_without_compatibility_check<U: ?Sized + Service>(self) -> ServiceRef<U> {
+        debug_assert!(!*self.consumed.consumed.borrow());
+        self.consumed.consume();
         ServiceRef {
             service: self.service,
+            consumed: Consumed::new(),
             _marker: PhantomData,
         }
     }
 
     pub(crate) fn get_raw_export(self) -> Skeleton {
+        self.consumed.consume();
         match self.service {
             ExportOrImport::Export(x) => match x.into_inner() {
                 ExportEntry::ReadyToExport(s) => s,
@@ -83,6 +126,7 @@ impl<T: ?Sized + Service> ServiceRef<T> {
     pub(crate) fn from_raw_import(handle: HandleToExchange, port: Weak<dyn Port>) -> Self {
         Self {
             service: ExportOrImport::Import(handle, port),
+            consumed: Consumed::new(),
             _marker: PhantomData,
         }
     }
@@ -131,6 +175,7 @@ impl<T: ?Sized + Service> Serialize for ServiceRef<T> {
             let (handle, have_to_replace) = match &*export_entry.borrow() {
                 ExportEntry::ReadyToExport(service) => {
                     debug_assert_eq!(Arc::strong_count(&service.raw), 1);
+                    self.consumed.consume();
                     (
                         port_thread_local::get_port()
                             .upgrade()
@@ -158,6 +203,7 @@ impl<'de, T: ?Sized + Service> Deserialize<'de> for ServiceRef<T> {
         let handle = HandleToExchange::deserialize(deserializer)?;
         Ok(ServiceRef {
             service: ExportOrImport::Import(handle, port_thread_local::get_port()),
+            consumed: Consumed::new(),
             _marker: std::marker::PhantomData,
         })
     }
