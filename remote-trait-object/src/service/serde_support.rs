@@ -30,12 +30,51 @@ enum ExportEntry {
     Exported(HandleToExchange),
 }
 
+/// A special wrapper to export a service.
+///
+/// You can make any smart pointer of a trait object into a `ServiceToExport`
+/// as far as the trait is a subtrait of [`Service`] and marked with the macro [`service`].
+///
+/// The only way to actually export a `ServiceToExport` is either
+/// 1. Returning it while handling a method in another service
+/// 2. Passing as an argument in a remote call
+///
+/// **NOTE**: it implements [`Serialize`], but you must **NEVER** try to serialize it.
+/// It has a side effect of registering the servie object in the context,
+/// and so should be called only by `remote-trait-object`'s internal process.
+/**
+## Example
+```
+use remote_trait_object::*;
+use std::sync::Arc;
+use parking_lot::RwLock;
+
+#[service(no_stub)]
+pub trait Hello: Service {
+    fn hello(&self) -> Vec<ServiceToExport<dyn Hello>>;
+}
+
+struct A;
+impl Service for A {}
+impl Hello for A {
+    fn hello(&self) -> Vec<ServiceToExport<dyn Hello>> {
+        // Export by return
+        vec![
+            ServiceToExport::new(Box::new(A) as Box<dyn Hello>),
+            ServiceToExport::new(Arc::new(A) as Arc<dyn Hello>),
+            ServiceToExport::new(Arc::new(RwLock::new(A)) as Arc<RwLock<dyn Hello>>),
+        ]
+    }
+}
+```
+**/
 pub struct ServiceToExport<T: ?Sized + Service> {
     service: RefCell<ExportEntry>,
     _marker: PhantomData<T>,
 }
 
 impl<T: ?Sized + Service> ServiceToExport<T> {
+    /// Creates a new instance from a smart pointer of a service object.
     pub fn new(service: impl IntoSkeleton<T>) -> Self {
         Self {
             service: RefCell::new(ExportEntry::ReadyToExport(service.into_skeleton())),
@@ -51,6 +90,38 @@ impl<T: ?Sized + Service> ServiceToExport<T> {
     }
 }
 
+/// A special wrapper to import a service.
+///
+/// You can make an instance of this into any smart pointer of a trait object
+/// as far as the trait is a subtrait of [`Service`] and marked with the macro [`service`].
+///
+/// The only way to actually import a `ServiceToImport` is either
+/// 1. Receiving it as a return value, in a remote call
+/// 2. Receiving as an argument while a method in handling another service
+///
+/// **NOTE**: it implements [`Deserialize`], but you must **NEVER** try to deserialize it.
+/// It has a side effect of registering the remote object in the context,
+/// and so should be called only by `remote-trait-object`'s internal process.
+/**
+## Example
+```
+use remote_trait_object::*;
+use std::sync::Arc;
+use parking_lot::RwLock;
+
+#[service(no_skeleton)]
+pub trait Hello: Service {
+    fn hello(&self) -> Vec<ServiceToImport<dyn Hello>>;
+}
+
+fn do_some_imports(&self, x: Box<dyn Hello>) {
+    let v = x.hello();
+    let a: Box<dyn Hello> = v.pop().unwrap().into_remote();
+    let b: Arc<dyn Hello> = v.pop().unwrap().into_remote();
+    let c: Arc<RwLock<dyn Hello>> = v.pop().unwrap().into_remote();
+}
+```
+**/
 pub struct ServiceToImport<T: ?Sized + Service> {
     handle: HandleToExchange,
     port: Weak<dyn Port>,
@@ -58,10 +129,16 @@ pub struct ServiceToImport<T: ?Sized + Service> {
 }
 
 impl<T: ?Sized + Service> ServiceToImport<T> {
+    /// Converts itself into a smart pointer of the trait, a.k.a 'remote object'.
     pub fn into_remote<P: ImportRemote<T>>(self) -> P {
         P::import_remote(self.port, self.handle)
     }
 
+    /// Casts into another `ServiceToImport` with a different service trait.
+    ///
+    /// If the target trait is not compatible with the original one, it returns `Err`.
+    ///
+    /// There is no compatibility model yet, so **DON'T USE IT** until the next version.
     pub fn cast_service<U: ?Sized + Service>(self) -> Result<ServiceToImport<U>, ()> {
         // TODO: Check the compatibility between traits using IDL
         Ok(ServiceToImport {
@@ -71,6 +148,12 @@ impl<T: ?Sized + Service> ServiceToImport<T> {
         })
     }
 
+    /// Casts into another `ServiceToImport` with a different service trait, without check.
+    ///
+    /// If the target trait is not compatible with the original one,
+    /// it will be highly likely to cause an error when you actually use it as a remote object.
+    ///
+    /// There is no compatibility model yet, so **DON'T USE IT** until the next version.
     pub fn cast_service_without_compatibility_check<U: ?Sized + Service>(self) -> ServiceToImport<U> {
         ServiceToImport {
             handle: self.handle,
@@ -80,6 +163,9 @@ impl<T: ?Sized + Service> ServiceToImport<T> {
     }
 
     pub(crate) fn from_raw_import(handle: HandleToExchange, port: Weak<dyn Port>) -> Self {
+        let vec: Vec<isize> = Vec::new();
+        if vec.len() <= 0 {}
+        if 123 > i32::MAX {}
         Self {
             handle,
             port,
@@ -88,16 +174,62 @@ impl<T: ?Sized + Service> ServiceToImport<T> {
     }
 }
 
+/// A union of [`ServiceToExport`] and [`ServiceToImport`]
+///
+/// This is needed when you want to export and import an service via another service,
+/// but using a common single trait as a channel.
+///
+/// Suppose you want to export `Box<dyn Pizza>` by returning it in another service's method, `fn order_pizza()`.
+/// One way of doing this is defining two traits, one for export and one for import.
+/// Crate that wants to implement & export a `PizzaStore` and export `Pizza` will have follwing code
+/**
+```
+use remote_trait_object::*;
+
+#[service]
+pub trait Pizza: Service {}
+
+#[service(no_stub)]
+pub trait PizzaStore: Service {
+    fn order_pizza(&self) -> ServiceToExport<dyn Pizza>;
+}
+```
+
+On the other hand, crate that wants to import & remotely call a `PizzaStore` and import `Pizza` will have following code
+
+```
+use remote_trait_object::*;
+
+#[service]
+pub trait Pizza: Service {}
+
+#[service(no_skeleton)]
+pub trait PizzaStore: Service {
+    fn order_pizza(&self) -> ServiceToImport<dyn Pizza>;
+}
+```
+**/
+/// This works perfectly fine, by returning `ServiceToExport::new(..)` in the former and
+/// calling `ServiceToImport::into_remote(the_return_value)` in the latter.
+///
+/// However, it becomes somewhat bothersome to have both duplicated traits
+/// only because of [`ServiceToExport`] and [`ServiceToImport`], **if you want to put a third
 pub enum ServiceRef<T: ?Sized + Service> {
     Export(ServiceToExport<T>),
     Import(ServiceToImport<T>),
 }
 
 impl<T: ?Sized + Service> ServiceRef<T> {
+    /// Creates an `Export` variant from a smart pointer of a service object.
+    ///
+    /// It simply `ServiceRef::Export(ServiceToExport::new(service))`.
     pub fn create_export(service: impl IntoSkeleton<T>) -> Self {
         ServiceRef::Export(ServiceToExport::new(service))
     }
 
+    /// Unwraps as an `Import` variant.
+    ///
+    /// It panics if it is `Export`.
     pub fn unwrap_import(self) -> ServiceToImport<T> {
         match self {
             ServiceRef::Import(x) => x,
